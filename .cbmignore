@@ -1,0 +1,68 @@
+# ============================================
+# Test files — không cần trace vào test suite
+# ============================================
+# *.spec.ts
+# *.e2e-spec.ts
+
+# ============================================
+# Demo site service — user-generated data
+# ============================================
+/demo-site-service/data/
+
+# ============================================
+# Third-party vendored assets — không phải source code
+# ============================================
+/ultimate-boards-ui/public/assets/pdfjs/
+
+# ============================================
+# Backup / archive — code cũ, dễ gây trùng lặp
+# kết quả search (đã thấy y hệt case ub-dashboard-api
+# trùng ultimate-boards-api)
+# ============================================
+/__bkp/
+
+# ============================================
+# Project management / planning — không phải code
+# ============================================
+/issues/
+/tasks/
+/plans/
+/.planning/
+/reports/
+/_others/
+
+# ============================================
+# Agent / tool config — không phải source code
+# ============================================
+/.agents/
+/.antigravitycli/
+/.gemini/
+
+# ============================================
+# Flutter build output
+# ============================================
+android/
+ios/
+build/
+.dart_tool/
+
+# ============================================
+# IDE/editor rác
+# ============================================
+.vscode/
+.claude/
+.serena/
+.github/
+.agents/
+# ============================================
+# Per-project docs — không kiểm soát được nội
+# dung, dễ lẫn note cũ/outdated vào search kết
+# quả. Chừa lại /docs/ ở root (docs chung của
+# cả monorepo, có kiểm soát). README.md ở root
+# mỗi service vẫn được index bình thường.
+# ============================================
+**/docs/
+!/docs/
+
+
+.codebase-memory

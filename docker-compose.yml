@@ -1,0 +1,60 @@
+services:
+  backend:
+    build:
+      context: .
+      target: runtime
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER:-trivia}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-trivia_local}
+      PGDATABASE: ${POSTGRES_DB:-trivia}
+      DATABASE_URL: postgresql://postgres:5432/${POSTGRES_DB:-trivia}
+    ports:
+      - '127.0.0.1:${PORT:-3000}:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health', { signal: AbortSignal.timeout(2000) }).then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 15s
+
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-trivia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trivia_local}
+      POSTGRES_DB: ${POSTGRES_DB:-trivia}
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  tools:
+    profiles: [tools]
+    build:
+      context: .
+      target: development
+    command: npm run check
+
+volumes:
+  postgres_data:
