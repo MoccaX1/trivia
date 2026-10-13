@@ -9,9 +9,45 @@ test('configuration defaults and explicit listener settings', () => {
     host: '127.0.0.1',
     port: 3000,
     logLevel: 'info',
-    databaseUrl,
+    database: {
+      host: 'localhost',
+      port: 5432,
+      user: 'trivia',
+      password: 'local',
+      database: 'trivia',
+      ssl: false,
+    },
   });
   assert.equal(readConfig({ DATABASE_URL: databaseUrl, PORT: '4000' }).port, 4000);
+});
+
+test('database URL is complete, explicitly decoded, and independent of PG variables', () => {
+  const user = 'u:@/?#%$+ space';
+  const password = 'p:@/?#%$+ space';
+  const database = 'db/@?#%+ space';
+  const url = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@[::1]/${encodeURIComponent(database)}`;
+  assert.deepEqual(readConfig({ DATABASE_URL: url, PGPORT: '9999', PGUSER: 'wrong' }).database, {
+    host: '::1',
+    port: 5432,
+    user,
+    password,
+    database,
+    ssl: false,
+  });
+  assert.equal(readConfig({ DATABASE_URL: url + '?sslmode=verify-full' }).database.ssl, true);
+  for (const incomplete of [
+    'postgresql://localhost/trivia',
+    'postgresql://user@localhost/trivia',
+    'postgresql://:password@localhost/trivia',
+    'postgresql://user:password@localhost',
+    'postgresql://user:%XX@localhost/trivia',
+    url + '?user=override',
+    url + '?sslmode=no-verify',
+    url + '?sslmode=disable&sslmode=verify-full',
+    url + '#secret',
+  ]) {
+    assert.throws(() => readConfig({ DATABASE_URL: incomplete }), /DATABASE_URL/);
+  }
 });
 
 test('invalid configuration fails without exposing database credentials', () => {

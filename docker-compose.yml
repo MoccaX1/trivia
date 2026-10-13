@@ -7,12 +7,7 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      PGHOST: postgres
-      PGPORT: 5432
-      PGUSER: ${POSTGRES_USER:-trivia}
-      PGPASSWORD: ${POSTGRES_PASSWORD:-trivia_local}
-      PGDATABASE: ${POSTGRES_DB:-trivia}
-      DATABASE_URL: postgresql://postgres:5432/${POSTGRES_DB:-trivia}
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql://trivia:trivia_local@postgres:5432/trivia}
     ports:
       - '127.0.0.1:${PORT:-3000}:3000'
     depends_on:

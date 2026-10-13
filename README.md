@@ -43,12 +43,26 @@ the backend also executes `SELECT 1` before listening. Both services have health
 checks. Local ports bind to loopback; backend listens on `0.0.0.0` inside its
 container. The runtime image runs as the unprivileged `node` user.
 
-Compose uses `PGUSER`/`PGPASSWORD` for credentials and injects an internal
-`DATABASE_URL` pointing to `postgres`; the `.env` URL is for native development.
-Keep native URL credentials/database name synchronized if you change PostgreSQL
-settings. URL credentials must be percent-encoded when necessary. These defaults
-are local-development credentials, not production secrets. PostgreSQL initialization
-settings apply only when the named data volume is first created.
+`DATABASE_URL` is the backend's only database configuration source. It must include
+username, nonempty password, host, and database; port defaults explicitly to 5432.
+The backend decodes the URL into explicit pool settings and ignores `PG*` connection
+variables. TLS defaults to disabled for local development; `?sslmode=verify-full`
+enables certificate/hostname verification. Other URL query options are rejected.
+
+For native development set `DATABASE_URL` with the published localhost port. For
+Compose set `COMPOSE_DATABASE_URL` with the internal `postgres:5432` address; Compose
+passes that complete value to the backend as `DATABASE_URL`. Percent-encode username,
+password, and database **independently**, for example with `encodeURIComponent`.
+A password `p@ss:/?#%$` becomes `p%40ss%3A%2F%3F%23%25%24`. Do not interpolate raw
+credentials into a URI. Single-quote raw `.env` values containing `#`, `$`, or spaces
+so Compose does not interpolate `$` in provisioning passwords.
+
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` provision the database container
+only; they must match the decoded backend URLs. These defaults are local-development
+credentials, not production secrets. Provisioning changes apply only to a newly
+initialized volume; existing credentials are not changed by editing `.env`. Keep
+URLs out of logs and command output; failure diagnostics report codes, not driver
+messages or stacks that could contain secrets.
 
 ```sh
 # Rebuild after source or dependency changes; no source bind mount is used.
@@ -64,7 +78,10 @@ docker compose down
 
 The optional `tools` profile runs checks on demand; it is not another backend
 process. SIGINT/SIGTERM close Socket.IO connections, drain HTTP, and end the database
-pool. Shutdown has a 10-second bound; Compose allows 15 seconds before killing.
+pool, in that order. Signals during startup request shutdown; cleanup waits for the
+bounded startup operation to settle. Repeated signals share that same cleanup path.
+Startup/cleanup failures exit nonzero, including a connection failure after a shutdown
+request. Shutdown has a 10-second bound; Compose allows 15 seconds before killing.
 
 ## Native development
 
@@ -94,7 +111,12 @@ Missing/invalid settings fail startup; the database connection attempt is bounde
 Smoke checks load `.env` and use its `PORT`; set `SMOKE_URL=http://127.0.0.1:4000`
 to test another address. Ordinary tests use
 ephemeral loopback ports and do not need PostgreSQL. They verify that active clients
-disconnect and the listener closes. No coverage threshold is imposed yet.
+disconnect and the listener closes. Lifecycle regressions control startup barriers
+and use child processes so signals and exit codes are real. The PostgreSQL integration
+test is skipped unless `TEST_DATABASE_URL` is supplied; run it against Compose with
+`docker compose --profile tools run --build --rm -e TEST_DATABASE_URL tools npm test`
+after exporting a complete URL to the internal `postgres:5432` address. No coverage
+threshold is imposed yet.
 
 Docker-only contributors can install/update the lockfile without host Node:
 

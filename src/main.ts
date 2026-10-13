@@ -1,71 +1,93 @@
+import { pathToFileURL } from 'node:url';
 import { readConfig } from './config.js';
 import { connectPostgres } from './persistence/postgres.js';
 import { createServer } from './transport/server.js';
 
-async function main() {
-  const config = readConfig();
-  const server = createServer({ logger: { level: config.logLevel } });
-  const database = connectPostgres(config.databaseUrl);
+// Log stable failure codes only: driver messages/stacks can contain credentials.
+function failureCode(error: unknown) {
+  const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+  return typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code) ? code : 'UNKNOWN';
+}
 
-  database.on('error', (err) => {
-    server.log.error({ err }, 'Unexpected idle PostgreSQL connection error');
-  });
-  server.addHook('onClose', async () => {
-    await database.end();
-  });
-
+export async function runBackend(
+  config: ReturnType<typeof readConfig>,
+  server = createServer({ logger: { level: config.logLevel } }),
+  database = connectPostgres(config.database),
+) {
   let shutdownRequested = false;
-  const startup = (async () => {
-    // Fail startup promptly if the configured database cannot be reached.
-    await database.query('SELECT 1');
-    if (!shutdownRequested) {
-      await server.listen({ host: config.host, port: config.port });
-    }
-  })();
+  let resolveShutdown: () => void;
+  const requested = new Promise<void>((resolve) => {
+    resolveShutdown = resolve;
+  });
+  let deadline: NodeJS.Timeout | undefined;
 
-  let shutdown: Promise<void> | undefined;
-  function stop(signal: NodeJS.Signals) {
-    if (shutdown) return;
-    shutdownRequested = true;
-    server.log.info({ signal }, 'Backend shutdown started');
-    const deadline = setTimeout(() => {
-      server.log.error('Backend shutdown exceeded 10 seconds');
+  function boundShutdown() {
+    deadline ??= setTimeout(() => {
+      console.error('Backend shutdown exceeded 10 seconds');
       process.exit(1);
     }, 10_000);
-    deadline.unref();
-
-    // Close resources after startup settles, even if interrupted or failed.
-    shutdown = startup
-      .then(
-        () => server.close(),
-        () => server.close(),
-      )
-      .then(
-        () => {
-          clearTimeout(deadline);
-          server.log.info('Backend shutdown complete');
-        },
-        (err: unknown) => {
-          clearTimeout(deadline);
-          server.log.error({ err }, 'Backend shutdown failed');
-          process.exitCode = 1;
-        },
-      );
+  }
+  function stop(signal: NodeJS.Signals) {
+    if (shutdownRequested) return;
+    shutdownRequested = true;
+    server.log.info({ signal }, 'Backend shutdown requested');
+    boundShutdown();
+    resolveShutdown();
+  }
+  function databaseError(error: unknown) {
+    server.log.error({ code: failureCode(error) }, 'Unexpected idle PostgreSQL connection error');
   }
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+  database.on('error', databaseError);
 
   try {
-    await startup;
-  } catch (err) {
-    server.log.error({ err }, 'Backend startup failed');
-    await server.close();
-    throw err;
+    await database.query('SELECT 1');
+    if (!shutdownRequested) await server.listen({ host: config.host, port: config.port });
+    if (!shutdownRequested) await requested;
+  } catch (error) {
+    process.exitCode = 1;
+    server.log.error({ code: failureCode(error) }, 'Backend startup failed');
+  } finally {
+    // One owner/path for cleanup, including signals concurrent with a failure.
+    // Keep handlers installed until cleanup finishes so repeated signals are safe.
+    shutdownRequested = true;
+    boundShutdown();
+    let cleanupFailed = false;
+    let databaseClosed = false;
+    try {
+      await server.close();
+    } catch (error) {
+      cleanupFailed = true;
+      process.exitCode = 1;
+      server.log.error({ code: failureCode(error) }, 'HTTP/realtime cleanup failed');
+    }
+    try {
+      await database.end();
+      databaseClosed = true;
+    } catch (error) {
+      cleanupFailed = true;
+      process.exitCode = 1;
+      server.log.error({ code: failureCode(error) }, 'PostgreSQL cleanup failed');
+    } finally {
+      // A failed close may leave live resources. Keep the bound in that case,
+      // but do not let the timer itself delay an otherwise natural failure exit.
+      if (cleanupFailed) deadline?.unref();
+      else clearTimeout(deadline);
+      process.off('SIGINT', stop);
+      process.off('SIGTERM', stop);
+      if (databaseClosed) database.off('error', databaseError);
+    }
+    server.log.info('Backend shutdown complete');
   }
 }
 
-main().catch((err: unknown) => {
-  // Configuration errors occur before the structured logger is available.
-  console.error('Backend failed:', err instanceof Error ? err.message : 'Unknown startup error');
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await runBackend(readConfig());
+  } catch {
+    // Configuration/construction errors occur before logging is available.
+    console.error('Backend initialization failed; check configuration');
+    process.exitCode = 1;
+  }
+}
