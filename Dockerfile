@@ -1,8 +1,9 @@
 FROM node:24-bookworm-slim AS development
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY tsconfig*.json eslint.config.mjs .prettierrc.json .prettierignore ./
+COPY tsconfig*.json eslint.config.mjs .prettierrc.json .prettierignore .release-it.json ./
 COPY src ./src
 COPY tests ./tests
 COPY scripts ./scripts

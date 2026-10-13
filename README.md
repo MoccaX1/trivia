@@ -21,7 +21,7 @@ remain authoritative. Open/deferred policies require an approved decision.
 ## Prerequisites
 
 - Docker Engine with Docker Compose v2 or newer.
-- Node.js 24 and its bundled npm for native development (optional for Docker-only use).
+- Node.js 24.15+ and its bundled npm for native development (optional for Docker-only use).
 - Free local ports 3000 and 5432, or alternatives set in `.env`.
 
 If ports are occupied, change `PORT` and `POSTGRES_PORT` in `.env` and update the
@@ -124,6 +124,41 @@ Docker-only contributors can install/update the lockfile without host Node:
 docker run --rm --user "$(id -u):$(id -g)" -e npm_config_cache=/tmp/npm-cache \
   -v "$PWD:/app" -w /app node:24-bookworm-slim npm ci
 ```
+
+## Commits and releases
+
+Use Conventional Commits for normal development, for example `feat(engine): add
+round validation`, `fix(transport): close sockets`, or `docs: clarify setup`.
+A normal commit does not bump the version or create a release tag. `feat` recommends
+minor, `fix` recommends patch, and `!` or a `BREAKING CHANGE:` footer recommends major,
+including breaking changes on normally hidden types.
+
+From a checkout with Node.js 24.15+, npm, and Git, run:
+
+```sh
+npm run release:dry-run
+npm run release
+```
+
+Both require `main` and a clean tree, including untracked files. Commit development
+changes before running them. Dry-run previews the recommendation without modifying
+files or Git. A release updates `package.json` and `package-lock.json`, generates
+`CHANGELOG.md`, archives older sections, then creates a `chore(release): vX.Y.Z`
+commit and annotated `vX.Y.Z` tag. Push, npm publishing, and GitHub Releases are disabled.
+
+The changelog shows features, fixes, performance, reverts, documentation, and
+refactoring. Ordinary style/chore/test/build/ci entries are hidden. It keeps the
+10 newest complete releases in their generated newest-first order; introduction
+and Unreleased sections remain. Older sections move verbatim to
+`changelog/archive/vX.Y.Z.md`. Identical existing archives are safe; conflicts abort
+without removing notes. Inspect the working tree after a failed release before retrying.
+The initial changelog contains only its introduction, with no invented release history.
+
+The archival hook runs after this pinned plugin's `beforeRelease` write, before
+release-it stages all changed/new files. Integration tests verify this sequence in
+temporary Git repositories. The development Docker image includes Git for those
+checks; release commands themselves run from a Git checkout. A targeted `basic-ftp`
+override patches release-it's transitive proxy dependency; no extra release tool is used.
 
 ## Project structure and tooling
 

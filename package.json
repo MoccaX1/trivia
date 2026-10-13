@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.15.0 <25"
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env --import tsx --watch src/main.ts",
@@ -16,7 +16,9 @@
     "format:check": "prettier --check .",
     "test": "tsx --test tests/*.test.ts",
     "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build"
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build",
+    "release": "release-it",
+    "release:dry-run": "node scripts/check-release-tree.mjs && release-it --dry-run --ci"
   },
   "dependencies": {
     "fastify": "^5.12.5",
@@ -25,13 +27,20 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@release-it/conventional-changelog": "12.0.2",
     "@types/node": "^24.19.1",
     "@types/pg": "^8.23.1",
     "eslint": "^10.12.0",
     "prettier": "^3.9.9",
+    "release-it": "21.1.1",
     "socket.io-client": "^4.8.4",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.71.1"
+  },
+  "overrides": {
+    "get-uri": {
+      "basic-ftp": "6.2.3"
+    }
   }
 }

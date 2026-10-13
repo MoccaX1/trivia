@@ -1,0 +1,42 @@
+{
+  "git": {
+    "requireBranch": "main",
+    "requireCleanWorkingDir": true,
+    "requireUpstream": false,
+    "addUntrackedFiles": true,
+    "commitMessage": "chore(release): v${version}",
+    "tagName": "v${version}",
+    "tagAnnotation": "Trivia Game v${version}",
+    "push": false
+  },
+  "npm": { "publish": false },
+  "github": { "release": false },
+  "hooks": {
+    "before:init": "node scripts/check-release-tree.mjs",
+    "after:@release-it/conventional-changelog:beforeRelease": "node scripts/archive-changelog.mjs"
+  },
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "infile": "CHANGELOG.md",
+      "header": "# Trivia Game Changelog\n\nNotable changes are generated from Conventional Commits during versioned releases.",
+      "tagPrefix": "v",
+      "strictSemVer": true,
+      "preset": {
+        "name": "conventionalcommits",
+        "types": [
+          { "type": "feat", "section": "✨ Features", "effect": "bump" },
+          { "type": "fix", "section": "🐛 Bug Fixes", "effect": "bump" },
+          { "type": "perf", "section": "⚡ Performance Improvements", "effect": "bump" },
+          { "type": "revert", "section": "⏪ Reverts", "effect": "bump" },
+          { "type": "docs", "section": "📝 Documentation", "effect": "bump" },
+          { "type": "refactor", "section": "♻️ Code Refactoring", "effect": "bump" },
+          { "type": "style", "section": "💎 Styles", "effect": "hidden" },
+          { "type": "chore", "section": "🔧 Chores", "effect": "hidden" },
+          { "type": "test", "section": "✅ Tests", "effect": "hidden" },
+          { "type": "build", "section": "🏗️ Build System", "effect": "hidden" },
+          { "type": "ci", "section": "👷 CI/CD", "effect": "hidden" }
+        ]
+      }
+    }
+  }
+}

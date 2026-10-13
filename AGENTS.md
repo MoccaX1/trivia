@@ -47,8 +47,22 @@ The current skeleton has no gameplay, authentication, schema, migrations, Histor
 or frontend. Do not implement deferred policies or add Redis, brokers, distributed
 ownership, or active-Match recovery without approval. Preserve unrelated user work.
 Keep `.env`, dependencies, builds, and caches out of Git; retain the lockfile.
-Use concise imperative commit subjects and focused PR descriptions with verification.
+Use Conventional Commits (`feat`, `fix`, `docs`, `refactor`, etc.) and focused PR
+descriptions with verification.
 Do not commit or push unless requested.
 
 For structural codebase exploration, use the installed `codebase-memory` skill
 and verify coverage for relied-on files.
+
+## Release Workflow
+
+Normal development commits do not bump versions. Use `npm run release:dry-run`
+and, only when requested, `npm run release` from clean `main` with Node.js 24.15+
+and Git. `!`/`BREAKING CHANGE:` retain major-bump semantics, even on hidden types.
+Release-it synchronizes package/lock versions, generates notes, archives sections
+beyond the newest ten, then commits all release files and creates an annotated tag.
+Introduction and Unreleased content stay; conflicting archives abort without overwrite.
+The plugin writes in `beforeRelease`, so archive after that plugin-specific hook,
+not `after:bump`. Verify upgrades with temporary Git repositories. Automatic push,
+npm publish, and GitHub Releases are disabled; do not create real release commits
+or tags without explicit authorization.
