@@ -7,23 +7,36 @@ import {
   joinMatch,
   leaveMatch,
 } from '../src/domain/match-engine.js';
-import type { LobbyOutcome, WaitingMatch } from '../src/domain/match-engine.js';
+import type { MatchOutcome, WaitingMatch } from '../src/domain/match-engine.js';
 
 function lobby(): WaitingMatch {
   return createMatch('host', () => 'server-match-id').match;
 }
 
-function accepted(outcome: LobbyOutcome): WaitingMatch {
+function accepted(outcome: MatchOutcome): WaitingMatch {
   assert.equal(outcome.status, 'accepted');
   assert.ok(outcome.status === 'accepted');
   assert.equal(outcome.changed, true);
+  assert.ok(outcome.match.phase === 'WAITING');
   return outcome.match;
 }
 
-function rejected(outcome: LobbyOutcome, match: WaitingMatch, code: string): void {
+function rejected(outcome: MatchOutcome, match: WaitingMatch, code: string): void {
   assert.deepEqual(outcome, { status: 'rejected', code, match });
   assert.equal(outcome.match, match);
 }
+
+test('membership mutations fail before overflowing the safe-integer version', () => {
+  const match = { ...accepted(joinMatch(lobby(), 'player-two')), version: Number.MAX_SAFE_INTEGER };
+  const before = structuredClone(match);
+  assert.throws(() => joinMatch(match, 'third'), /version cannot advance safely/);
+  assert.throws(() => leaveMatch(match, 'player-two'), /version cannot advance safely/);
+  rejected(joinMatch(match, 'host'), match, 'ALREADY_MATCH_PARTICIPANT');
+  assert.equal(checkStartEligibility(match, 'host').match.version, Number.MAX_SAFE_INTEGER);
+  assert.deepEqual(match, before);
+  const penultimate = { ...match, version: Number.MAX_SAFE_INTEGER - 1 };
+  assert.equal(accepted(joinMatch(penultimate, 'third')).version, Number.MAX_SAFE_INTEGER);
+});
 
 test('create establishes a WAITING lobby with server-generated identity, Host and version 1', () => {
   const outcome = createMatch('durable-player-id', randomUUID);
