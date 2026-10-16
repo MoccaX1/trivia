@@ -16,7 +16,7 @@ restricts infrastructure imports under those paths. Define ports only when a
 concrete use case needs them, following the LLD; wire adapters in `main.ts`.
 
 `domain/match-engine.ts` exposes `createMatch`, `joinMatch`, `leaveMatch`,
-`checkStartEligibility`, `startMatch`, and `questionDeadline`. Creation takes
+`checkStartEligibility`, `startMatch`, `submitAnswer`, and `questionDeadline`. Creation takes
 trusted Player identity and a server-owned ID generator; it initializes version 1. Membership changes return a new immutable
 Match and increment the version once. Rejections preserve the original Match.
 Start eligibility returns accepted with `changed: false`; it does not execute
@@ -42,8 +42,7 @@ selected, ordered played questions and an authoritative `openedAt` clock reading
 current authoritative clock reading. Integer milliseconds share one caller-owned
 clock domain (no assumed epoch); the Engine derives 10-second answer and 5-second
 reveal deadlines. Reveal starts when the deadline command is applied, not at a
-past scheduled target. There are no scheduling, submission, scoring or next-round
-operations. Version overflow throws before mutation.
+past scheduled target. There are no scheduling or next-round operations. Version overflow throws before mutation.
 
 All engine outcomes contain **internal state**, not client acknowledgements or
 snapshots. `privateQuestions` and `currentQuestion.correctChoiceId` are private
@@ -51,3 +50,20 @@ answer keys; never serialize these outcomes directly to clients. The future
 Presenter must construct phase-safe projections and omit answer keys before
 REVEAL. Question selection/provider operations remain deferred; this API does not
 select, shuffle or assign source-content identities.
+
+Phase 2B adds `submitAnswer(match, playerId, command, receivedAt)`. The caller
+supplies trusted Player identity and authoritative ingress time separately from
+the Match/question/Choice payload. Eligibility is `0 <= elapsedMs < 10_000`.
+First answer is attempt 1; accepted different-choice changes increment to 3 and
+replace the final answer time. Same-choice is accepted with `changed: false`
+after validation; a fourth different choice rejects. Rejections/no-ops preserve
+state, attempt count, timing and version. No command-ID retry cache lives here.
+
+`privateSubmissions` contains frozen per-player answers. On question deadline,
+`resolvedQuestions` retains question content and each Player's final Submission,
+correctness and exact `bigint` score units (including zero for no answer).
+Correctness units are 30M/15M/10M for attempts 1/2/3; speed adds
+`(10_000 - finalAnsweredMs) * 3_000`. Wrong answers score zero; there is no extra
+change subtraction, rounding or 9-second cutoff. Equal units remain equal; no
+ranking or tie-breaking operation is added. These fields are private internal
+state, never client DTOs. Do not serialize engine outcomes directly to clients.

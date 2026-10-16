@@ -25,7 +25,26 @@ export interface PrivateQuestion {
   readonly correctChoiceId: string;
 }
 
+export interface Submission {
+  readonly playerId: PlayerId;
+  readonly choiceId: string;
+  readonly attemptCount: 1 | 2 | 3;
+  readonly finalAnsweredMs: number;
+}
+
+export interface ResolvedQuestionResult {
+  readonly questionIndex: number;
+  readonly question: StartedMatch['currentQuestion'];
+  readonly results: readonly {
+    readonly playerId: PlayerId;
+    readonly submission: Submission | null;
+    readonly correct: boolean;
+    readonly questionScoreUnits: bigint;
+  }[];
+}
+
 interface StartedMatchState extends MatchIdentity {
+  readonly privateSubmissions: readonly Submission[];
   readonly startedAt: number;
   readonly privateQuestions: readonly PrivateQuestion[];
   readonly currentQuestionIndex: 0;
@@ -43,6 +62,7 @@ export interface RevealMatch extends StartedMatchState {
   readonly phase: 'REVEAL';
   readonly revealOpenedAt: number;
   readonly revealDeadlineAt: number;
+  readonly resolvedQuestions: readonly ResolvedQuestionResult[];
 }
 
 export type StartedMatch = QuestionOpenMatch | RevealMatch;
@@ -53,6 +73,12 @@ export interface QuestionDeadlineCommand {
   readonly matchId: MatchId;
   readonly questionId: string;
   readonly deadlineAt: number;
+}
+
+export interface SubmitAnswerCommand {
+  readonly matchId: MatchId;
+  readonly questionId: string;
+  readonly choiceId: string;
 }
 
 type RejectionCode =
@@ -68,7 +94,10 @@ type RejectionCode =
   | 'MATCH_ID_MISMATCH'
   | 'QUESTION_NOT_CURRENT'
   | 'DEADLINE_MISMATCH'
-  | 'DEADLINE_NOT_REACHED';
+  | 'DEADLINE_NOT_REACHED'
+  | 'INVALID_CHOICE'
+  | 'ANSWER_WINDOW_CLOSED'
+  | 'MAX_ATTEMPTS_EXCEEDED';
 
 export type MatchOutcome<T extends MatchState = MatchState> =
   | { readonly status: 'accepted'; readonly match: T; readonly changed: boolean }
@@ -252,8 +281,74 @@ export function startMatch(
     privateQuestions,
     currentQuestionIndex: 0,
     currentQuestion: Object.freeze({ ...first, openedAt, deadlineAt }),
+    privateSubmissions: Object.freeze([]),
   });
   return { status: 'accepted', changed: true, match: started };
+}
+
+/** Player identity and receivedAt come from trusted server context, never the client payload. */
+export function submitAnswer(
+  match: MatchState,
+  playerId: PlayerId,
+  command: SubmitAnswerCommand,
+  receivedAt: number,
+): MatchOutcome {
+  assertIdentity(playerId);
+  if (match.phase !== 'QUESTION_OPEN') return reject(match, 'INVALID_MATCH_PHASE');
+  if (!match.participants.includes(playerId)) return reject(match, 'NOT_MATCH_PARTICIPANT');
+  if (command.matchId !== match.id) return reject(match, 'MATCH_ID_MISMATCH');
+  if (command.questionId !== match.currentQuestion.id) return reject(match, 'QUESTION_NOT_CURRENT');
+  if (!match.currentQuestion.choices.some((choice) => choice.id === command.choiceId)) {
+    return reject(match, 'INVALID_CHOICE');
+  }
+  const finalAnsweredMs = receivedAt - match.currentQuestion.openedAt;
+  if (!validTime(receivedAt) || finalAnsweredMs < 0) return reject(match, 'INVALID_TIMING');
+  if (receivedAt >= match.currentQuestion.deadlineAt) return reject(match, 'ANSWER_WINDOW_CLOSED');
+
+  const previous = match.privateSubmissions.find((submission) => submission.playerId === playerId);
+  if (previous?.choiceId === command.choiceId) {
+    return { status: 'accepted', changed: false, match };
+  }
+  if (previous?.attemptCount === 3) return reject(match, 'MAX_ATTEMPTS_EXCEEDED');
+  const attemptCount = previous ? (previous.attemptCount === 1 ? 2 : 3) : 1;
+  const submission: Submission = Object.freeze({
+    playerId,
+    choiceId: command.choiceId,
+    attemptCount,
+    finalAnsweredMs,
+  });
+  const privateSubmissions = Object.freeze(
+    previous
+      ? match.privateSubmissions.map((entry) => (entry.playerId === playerId ? submission : entry))
+      : [...match.privateSubmissions, submission],
+  );
+  return {
+    status: 'accepted',
+    changed: true,
+    match: Object.freeze({ ...match, privateSubmissions, version: nextVersion(match.version) }),
+  };
+}
+
+export const SCORE_UNITS_PER_POINT = 3_000_000n;
+
+function resolveQuestion(match: QuestionOpenMatch): ResolvedQuestionResult {
+  return Object.freeze({
+    questionIndex: match.currentQuestionIndex,
+    question: match.currentQuestion,
+    results: Object.freeze(
+      match.participants.map((playerId) => {
+        const submission =
+          match.privateSubmissions.find((entry) => entry.playerId === playerId) ?? null;
+        const correct = submission?.choiceId === match.currentQuestion.correctChoiceId;
+        const questionScoreUnits =
+          correct && submission
+            ? (10n * SCORE_UNITS_PER_POINT) / BigInt(submission.attemptCount) +
+              BigInt(10_000 - submission.finalAnsweredMs) * 3_000n
+            : 0n;
+        return Object.freeze({ playerId, submission, correct, questionScoreUnits });
+      }),
+    ),
+  });
 }
 
 /** now is an authoritative Clock reading at execution, not client time or a scheduling target. */
@@ -280,6 +375,7 @@ export function questionDeadline(
       version: nextVersion(match.version),
       revealOpenedAt: now,
       revealDeadlineAt,
+      resolvedQuestions: Object.freeze([resolveQuestion(match)]),
     }),
   };
 }
