@@ -1,5 +1,6 @@
 export type PlayerId = string;
 export type MatchId = string;
+export type QuestionIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 interface MatchIdentity {
   readonly id: MatchId;
@@ -33,7 +34,7 @@ export interface Submission {
 }
 
 export interface ResolvedQuestionResult {
-  readonly questionIndex: number;
+  readonly questionIndex: QuestionIndex;
   readonly question: StartedMatch['currentQuestion'];
   readonly results: readonly {
     readonly playerId: PlayerId;
@@ -44,10 +45,11 @@ export interface ResolvedQuestionResult {
 }
 
 interface StartedMatchState extends MatchIdentity {
+  readonly resolvedQuestions: readonly ResolvedQuestionResult[];
   readonly privateSubmissions: readonly Submission[];
   readonly startedAt: number;
   readonly privateQuestions: readonly PrivateQuestion[];
-  readonly currentQuestionIndex: 0;
+  readonly currentQuestionIndex: QuestionIndex;
   readonly currentQuestion: PrivateQuestion & {
     readonly openedAt: number;
     readonly deadlineAt: number;
@@ -62,14 +64,38 @@ export interface RevealMatch extends StartedMatchState {
   readonly phase: 'REVEAL';
   readonly revealOpenedAt: number;
   readonly revealDeadlineAt: number;
+}
+
+/** Completed authoritative facts; mapping to storage rows or client DTOs belongs outside the Engine. */
+export interface MatchResult {
+  readonly matchId: MatchId;
+  readonly hostPlayerId: PlayerId;
+  readonly startedAt: number;
+  readonly finishedAt: number;
+  readonly participants: readonly {
+    readonly playerId: PlayerId;
+    readonly finalScoreUnits: bigint;
+    readonly finalRank: number;
+  }[];
   readonly resolvedQuestions: readonly ResolvedQuestionResult[];
+}
+
+export interface FinishedMatch extends MatchIdentity {
+  readonly phase: 'FINISHED';
+  readonly result: MatchResult;
 }
 
 export type StartedMatch = QuestionOpenMatch | RevealMatch;
 
-export type MatchState = WaitingMatch | StartedMatch;
+export type MatchState = WaitingMatch | StartedMatch | FinishedMatch;
 
 export interface QuestionDeadlineCommand {
+  readonly matchId: MatchId;
+  readonly questionId: string;
+  readonly deadlineAt: number;
+}
+
+export interface RevealDeadlineCommand {
   readonly matchId: MatchId;
   readonly questionId: string;
   readonly deadlineAt: number;
@@ -125,6 +151,25 @@ function nextVersion(version: number): number {
     throw new Error('Match version cannot advance safely');
   }
   return version + 1;
+}
+
+function assertQuestionHistory(match: StartedMatch): void {
+  const index = match.currentQuestionIndex;
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index > 9 ||
+    match.privateQuestions.length !== 10 ||
+    match.currentQuestion.id !== match.privateQuestions[index]?.id ||
+    match.resolvedQuestions.length !== index + (match.phase === 'REVEAL' ? 1 : 0) ||
+    match.resolvedQuestions.some(
+      (resolved, position) =>
+        resolved.questionIndex !== position ||
+        resolved.question.id !== match.privateQuestions[position]?.id,
+    )
+  ) {
+    throw new Error('Invalid Match question history invariant');
+  }
 }
 
 /** The caller supplies trusted Player identity and a server-owned ID generator, never client IDs. */
@@ -282,6 +327,7 @@ export function startMatch(
     currentQuestionIndex: 0,
     currentQuestion: Object.freeze({ ...first, openedAt, deadlineAt }),
     privateSubmissions: Object.freeze([]),
+    resolvedQuestions: Object.freeze([]),
   });
   return { status: 'accepted', changed: true, match: started };
 }
@@ -294,7 +340,9 @@ export function submitAnswer(
   receivedAt: number,
 ): MatchOutcome {
   assertIdentity(playerId);
+  if (match.phase === 'FINISHED') return reject(match, 'MATCH_FINISHED');
   if (match.phase !== 'QUESTION_OPEN') return reject(match, 'INVALID_MATCH_PHASE');
+  assertQuestionHistory(match);
   if (!match.participants.includes(playerId)) return reject(match, 'NOT_MATCH_PARTICIPANT');
   if (command.matchId !== match.id) return reject(match, 'MATCH_ID_MISMATCH');
   if (command.questionId !== match.currentQuestion.id) return reject(match, 'QUESTION_NOT_CURRENT');
@@ -357,7 +405,9 @@ export function questionDeadline(
   command: QuestionDeadlineCommand,
   now: number,
 ): MatchOutcome {
+  if (match.phase === 'FINISHED') return reject(match, 'MATCH_FINISHED');
   if (match.phase !== 'QUESTION_OPEN') return reject(match, 'INVALID_MATCH_PHASE');
+  assertQuestionHistory(match);
   if (command.matchId !== match.id) return reject(match, 'MATCH_ID_MISMATCH');
   if (command.questionId !== match.currentQuestion.id) return reject(match, 'QUESTION_NOT_CURRENT');
   if (!validTime(command.deadlineAt) || !validTime(now)) return reject(match, 'INVALID_TIMING');
@@ -375,7 +425,79 @@ export function questionDeadline(
       version: nextVersion(match.version),
       revealOpenedAt: now,
       revealDeadlineAt,
-      resolvedQuestions: Object.freeze([resolveQuestion(match)]),
+      resolvedQuestions: Object.freeze([...match.resolvedQuestions, resolveQuestion(match)]),
     }),
   };
+}
+
+/** Timer identity and execution time are supplied by the authoritative server command path. */
+export function revealDeadline(
+  match: MatchState,
+  command: RevealDeadlineCommand,
+  now: number,
+): MatchOutcome {
+  if (match.phase === 'FINISHED') return reject(match, 'MATCH_FINISHED');
+  if (match.phase !== 'REVEAL') return reject(match, 'INVALID_MATCH_PHASE');
+  assertQuestionHistory(match);
+  if (command.matchId !== match.id) return reject(match, 'MATCH_ID_MISMATCH');
+  if (command.questionId !== match.currentQuestion.id) return reject(match, 'QUESTION_NOT_CURRENT');
+  if (!validTime(command.deadlineAt) || !validTime(now)) return reject(match, 'INVALID_TIMING');
+  if (command.deadlineAt !== match.revealDeadlineAt) return reject(match, 'DEADLINE_MISMATCH');
+  if (now < command.deadlineAt) return reject(match, 'DEADLINE_NOT_REACHED');
+  if (match.currentQuestionIndex === 9) {
+    const version = nextVersion(match.version);
+    const totals = match.participants.map((playerId) => ({
+      playerId,
+      finalScoreUnits: match.resolvedQuestions.reduce((total, question) => {
+        const result = question.results.find((entry) => entry.playerId === playerId);
+        if (!result) throw new Error('Missing participant question result');
+        return total + result.questionScoreUnits;
+      }, 0n),
+    }));
+    const result: MatchResult = Object.freeze({
+      matchId: match.id,
+      hostPlayerId: match.hostPlayerId,
+      startedAt: match.startedAt,
+      finishedAt: now,
+      participants: Object.freeze(
+        totals.map((participant) =>
+          Object.freeze({
+            ...participant,
+            // Competition ranking: ties share rank and occupy positions; no secondary tie-breaker.
+            finalRank:
+              1 +
+              totals.filter((other) => other.finalScoreUnits > participant.finalScoreUnits).length,
+          }),
+        ),
+      ),
+      resolvedQuestions: match.resolvedQuestions,
+    });
+    const finished: FinishedMatch = Object.freeze({
+      id: match.id,
+      hostPlayerId: match.hostPlayerId,
+      participants: match.participants,
+      version,
+      phase: 'FINISHED',
+      result,
+    });
+    return { status: 'accepted', changed: true, match: finished };
+  }
+  const deadlineAt = deadlineAfter(now, 10_000);
+  if (deadlineAt === undefined) return reject(match, 'INVALID_TIMING');
+  const index = (match.currentQuestionIndex + 1) as QuestionIndex;
+  const question = match.privateQuestions[index]!; // Validated ten-question set and bounded index.
+  const next: QuestionOpenMatch = Object.freeze({
+    id: match.id,
+    hostPlayerId: match.hostPlayerId,
+    participants: match.participants,
+    version: nextVersion(match.version),
+    phase: 'QUESTION_OPEN',
+    startedAt: match.startedAt,
+    privateQuestions: match.privateQuestions,
+    currentQuestionIndex: index,
+    currentQuestion: Object.freeze({ ...question, openedAt: now, deadlineAt }),
+    privateSubmissions: Object.freeze([]),
+    resolvedQuestions: match.resolvedQuestions,
+  });
+  return { status: 'accepted', changed: true, match: next };
 }
