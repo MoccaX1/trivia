@@ -3,15 +3,14 @@
 `main.ts` is the composition root: configuration, database availability, listening,
 and process signals. `config.ts` validates environment variables.
 
-| Location                | Responsibility                                                                | Allowed dependencies                                                    |
-| ----------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `transport/`            | Fastify HTTP and Socket.IO connections, later validation and safe delivery    | Application contracts; transport libraries                              |
-| `application/` (future) | Match lookup, ordered ingress, serialization, idempotency, completion handoff | Domain and required ports; no Fastify, Socket.IO, or PostgreSQL imports |
-| `domain/`               | WAITING membership, Start and question deadline lifecycle                     | Pure TypeScript; no transport, persistence, or application imports      |
-| `persistence/`          | PostgreSQL connection lifecycle, later durable adapters                       | PostgreSQL and required domain/application contracts                    |
+| Location       | Responsibility                                                                | Allowed dependencies                                                    |
+| -------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `transport/`   | Fastify HTTP and Socket.IO connections, later validation and safe delivery    | Application contracts; transport libraries                              |
+| `application/` | Match lookup, ordered ingress, serialization, idempotency, completion handoff | Domain and required ports; no Fastify, Socket.IO, or PostgreSQL imports |
+| `domain/`      | WAITING membership, Start and question deadline lifecycle                     | Pure TypeScript; no transport, persistence, or application imports      |
+| `persistence/` | PostgreSQL connection lifecycle, later durable adapters                       | PostgreSQL and required domain/application contracts                    |
 
-The application directory will be introduced with its first behavior;
-there are no empty modules or speculative interfaces. ESLint already
+The application runtime owns the Registry, serialized admission and scheduling boundary. ESLint already
 restricts infrastructure imports under those paths. Define ports only when a
 concrete use case needs them, following the LLD; wire adapters in `main.ts`.
 
@@ -21,7 +20,7 @@ trusted Player identity and a server-owned ID generator; it initializes version 
 Match and increment the version once. Rejections preserve the original Match.
 Start eligibility returns accepted with `changed: false`; it does not execute
 Start. No WAITING membership command has an approved successful no-op (duplicate
-Join rejects). Command-ID retry handling belongs to the future Coordinator.
+Join rejects). Command-ID retry handling belongs to the Coordinator.
 Host leave returns an explicit unsupported outcome; departure policy is deferred.
 Invalid trusted identities or corrupt internal aggregates throw programming errors,
 not authentication or gameplay rejections. Phase 1 stores participant IDs only;
@@ -42,7 +41,7 @@ selected, ordered played questions and an authoritative `openedAt` clock reading
 current authoritative clock reading. Integer milliseconds share one caller-owned
 clock domain (no assumed epoch); the Engine derives 10-second answer and 5-second
 reveal deadlines. Reveal starts when the deadline command is applied, not at a
-past scheduled target. There is no scheduling infrastructure. Version overflow throws before mutation.
+past scheduled target. Scheduling adapters live outside the Engine. Version overflow throws before mutation.
 
 All engine outcomes contain **internal state**, not client acknowledgements or
 snapshots. `privateQuestions` and `currentQuestion.correctChoiceId` are private
@@ -84,3 +83,40 @@ No timestamp, answer order or participant order breaks ties. Participant array
 order is retained solely for deterministic output. This policy follows the explicit
 M1 clarification; frozen design documents remain unchanged. Engine results remain
 private authoritative facts for future persistence/projection adapters.
+
+Phase 3 adds `application/match-coordinator.ts`. Construct `MatchCoordinator`
+with a `Clock`, `MatchScheduler` and server-owned Match ID generator. Use
+`create(playerId, commandId)`, `dispatch(playerId, commandId, command)`,
+`timeout(command)`, `lookup(matchId)`, `whenIdle(matchId)` and `shutdown()`.
+The private `MatchRegistry` registers immutable aggregates, rejects duplicate IDs
+and commits against the expected current aggregate; it exposes no mutable Map.
+Missing Matches return `MATCH_NOT_FOUND`; malformed trusted application input
+throws, while Engine rejection/unsupported/no-op outcomes remain explicit.
+
+Admission synchronously captures `receivedAt`, assigns a per-Match receipt sequence
+and appends to its FIFO Promise chain without yielding. Answers use stored ingress
+time; Start and deadline transitions use a fresh authoritative execution time.
+Timeouts cannot be admitted early. An already-admitted 9,999ms answer precedes a
+10,000ms close barrier even if both execute later. The Clock must be monotonic;
+`runtime/match-time.ts` supplies an epoch-based monotonic `SystemClock` and a
+`NodeMatchScheduler` that rechecks early wakeups. No adapter is wired to HTTP or
+Socket.IO in this phase.
+
+Engine state commits before receipts are returned and before changed-phase timers
+are scheduled. Answers/no-ops do not replace the existing deadline. Timer commands
+carry Match/question/deadline identity and use the same FIFO path. Cancellation
+is only an optimization; stale callbacks still face Engine validation. Unexpected
+timer execution, cancellation and scheduling errors are retained for adapters via
+`takeTimerFailures()`; a scheduling failure after commit does not replay or roll
+back a committed mutation. There is no automatic retry of unexpected failures.
+
+Approved M1 policy: player command retries are keyed by
+`(matchId, playerId, commandId)`, with separate `(playerId, commandId)` Create keys.
+In-flight and completed retries return the original receipt; reused IDs do not
+introduce payload-conflict rules. Exceptions establish no outcome. Registered
+FINISHED state and successful/missing/rejected/unsupported/no-op receipts stay
+until runtime shutdown, with no TTL, eviction or release API. Idle queue chains
+are discarded; FINISHED cancels timers. `shutdown()` stops admission, cancels
+scheduled work, drains admitted operations, then clears retained state/caches.
+Retention consumes process memory and provides no restart recovery. All runtime
+outcomes remain private and require future safe projections.

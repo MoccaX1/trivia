@@ -1,9 +1,11 @@
 # Trivia Game M1 backend
 
-Single-process TypeScript backend skeleton: Fastify HTTP and Socket.IO share one
+Single-process TypeScript backend: Fastify HTTP and Socket.IO share one
 Node.js HTTP server; PostgreSQL supplies local durable storage infrastructure.
-This foundation has no gameplay, authentication, application tables, migrations,
-History API, or frontend yet.
+The pure Match Engine and application runtime support the complete ten-question
+lifecycle, serialized commands and authoritative timers. They are not connected
+to transport gameplay handlers yet. Authentication, application tables, migrations,
+History API and frontend remain unimplemented.
 
 ## Design authority
 
@@ -167,17 +169,20 @@ src/main.ts                 Composition, database startup, signals
 src/config.ts               Environment validation
 src/transport/server.ts     Shared Fastify/Socket.IO listener and health
 src/persistence/postgres.ts PostgreSQL pool; no schema
-src/README.md               Ownership and future application/domain boundaries
-tests/*.test.ts             Node test runner smoke/configuration tests
+src/domain/match-engine.ts  Pure Match lifecycle, answers, scoring and MatchResult
+src/application/            Registry, Coordinator, Clock/Scheduler contracts
+src/runtime/match-time.ts   Production monotonic clock and Node timer adapter
+src/README.md               Runtime APIs, ownership and retry/lifecycle policies
+tests/*.test.ts             Deterministic domain/runtime and infrastructure tests
 scripts/smoke.mjs           Smoke check for a running environment
 docs/                       Preserved architectural and engineering designs
 Dockerfile                  Development, build, and minimal runtime stages
 docker-compose.yml          Backend, PostgreSQL, optional tooling profile
 ```
 
-Application/coordinator and domain/engine directories will appear with their first
-approved behavior. Keep them independent of transport and database libraries;
-ESLint restrictions are already configured for their paths. Persistence will
+Keep application and domain code independent of transport and database libraries;
+ESLint restrictions enforce those boundaries. See `src/README.md` for runtime
+admission, retry retention and shutdown contracts. Persistence will
 implement required ports, and `main.ts` will wire concrete dependencies.
 
 TypeScript uses strict ESM/NodeNext with `.js` import specifiers. `tsx` executes
