@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "fcaa5996c3f6135376ce7222456267e9a188f517",
+    "indexed_at": "2026-10-23T06:22:33Z",
+    "project": "Trivia",
+    "nodes": 838,
+    "edges": 1997,
+    "original_size": 4259840,
+    "compressed_size": 654539,
+    "compression_level": 3
+}
