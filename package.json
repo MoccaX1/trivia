@@ -16,11 +16,13 @@
     "format:check": "prettier --check .",
     "test": "tsx --test tests/*.test.ts",
     "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs",
+    "migrate": "npm run build && node --env-file-if-exists=.env scripts/migrate.mjs",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build",
     "release": "release-it",
     "release:dry-run": "node scripts/check-release-tree.mjs && release-it --dry-run --ci"
   },
   "dependencies": {
+    "@node-rs/argon2": "2.2.2",
     "fastify": "^5.12.5",
     "pg": "^8.23.1",
     "socket.io": "^4.8.4"

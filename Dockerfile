@@ -5,6 +5,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig*.json eslint.config.mjs .prettierrc.json .prettierignore .release-it.json ./
 COPY src ./src
+COPY migrations ./migrations
 COPY tests ./tests
 COPY scripts ./scripts
 CMD ["npm", "run", "dev"]

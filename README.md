@@ -4,8 +4,9 @@ Single-process TypeScript backend: Fastify HTTP and Socket.IO share one
 Node.js HTTP server; PostgreSQL supplies local durable storage infrastructure.
 The pure Match Engine and application runtime support the complete ten-question
 lifecycle, serialized commands and authoritative timers. They are not connected
-to transport gameplay handlers yet. Authentication, application tables, migrations,
-History API and frontend remain unimplemented.
+to transport gameplay handlers yet. Player/Credential persistence and password
+verification exist, but HTTP/socket authentication, History API and frontend remain
+unimplemented.
 
 ## Design authority
 
@@ -85,6 +86,37 @@ bounded startup operation to settle. Repeated signals share that same cleanup pa
 Startup/cleanup failures exit nonzero, including a connection failure after a shutdown
 request. Shutdown has a 10-second bound; Compose allows 15 seconds before killing.
 
+## Player identity migration and verification
+
+The backend does not create schema at startup. Apply the versioned migration
+explicitly after PostgreSQL is healthy:
+
+```sh
+docker compose up -d --wait postgres
+docker compose --profile tools run --build --rm tools npm run migrate
+```
+
+For native development, `npm run migrate` uses `DATABASE_URL` from `.env` and
+builds first. Repeating the command is safe: applied SQL is tracked with a checksum;
+changed or unknown migration versions fail instead of being replayed. The migration
+creates `player` and `password_credential` only. Player IDs are server-generated UUIDs.
+No public registration or provisioning command is available.
+
+PostgreSQL integration tests require a separate database whose name ends in `_test`.
+For the default local Compose credentials, create one once with
+`docker compose exec postgres createdb -U trivia trivia_test` (skip this step if it
+already exists). Set `TEST_DATABASE_URL` in your untracked `.env` to a complete URL
+using host `postgres` and database `trivia_test`, then run:
+
+```sh
+docker compose --profile tools run --build --rm tools npm test
+```
+
+The tests verify the database name before writing and clean up only their own
+Player fixtures. They apply the migration to the test database. For native tests,
+export a corresponding localhost `TEST_DATABASE_URL` instead. Keep credentials out
+of committed files and command output.
+
 ## Native development
 
 ```sh
@@ -106,6 +138,7 @@ Missing/invalid settings fail startup; the database connection attempt is bounde
 | `npm run format` / `npm run format:check` | Apply/check Prettier formatting                                          |
 | `npm test`                                | Run real HTTP and Socket.IO smoke tests plus configuration tests         |
 | `npm run build`                           | Compile backend into ignored `dist/`                                     |
+| `npm run migrate`                         | Build and explicitly apply/check versioned PostgreSQL migrations         |
 | `npm start`                               | Start the compiled backend with `.env` loading                           |
 | `npm run check`                           | Typecheck, lint, formatting, tests, and build                            |
 | `npm run smoke`                           | Check health and polling/WebSocket connections against a running backend |
@@ -114,10 +147,9 @@ Smoke checks load `.env` and use its `PORT`; set `SMOKE_URL=http://127.0.0.1:400
 to test another address. Ordinary tests use
 ephemeral loopback ports and do not need PostgreSQL. They verify that active clients
 disconnect and the listener closes. Lifecycle regressions control startup barriers
-and use child processes so signals and exit codes are real. The PostgreSQL integration
-test is skipped unless `TEST_DATABASE_URL` is supplied; run it against Compose with
-`docker compose --profile tools run --build --rm -e TEST_DATABASE_URL tools npm test`
-after exporting a complete URL to the internal `postgres:5432` address. No coverage
+and use child processes so signals and exit codes are real. PostgreSQL integration
+tests are skipped unless `TEST_DATABASE_URL` is supplied. Use a dedicated `_test`
+database as described above. No coverage
 threshold is imposed yet.
 
 Docker-only contributors can install/update the lockfile without host Node:
@@ -168,7 +200,12 @@ override patches release-it's transitive proxy dependency; no extra release tool
 src/main.ts                 Composition, database startup, signals
 src/config.ts               Environment validation
 src/transport/server.ts     Shared Fastify/Socket.IO listener and health
-src/persistence/postgres.ts PostgreSQL pool; no schema
+src/persistence/postgres.ts PostgreSQL pool
+src/persistence/players.ts  Player/Credential SQL repository
+src/persistence/migrations.ts Explicit migration runner
+src/application/password.ts Argon2id hashing and verification
+src/application/authenticate-player.ts Internal authentication/provisioning use cases
+migrations/                 Versioned Player/Credential SQL
 src/domain/match-engine.ts  Pure Match lifecycle, answers, scoring and MatchResult
 src/application/            Registry, Coordinator, Clock/Scheduler contracts
 src/runtime/match-time.ts   Production monotonic clock and Node timer adapter

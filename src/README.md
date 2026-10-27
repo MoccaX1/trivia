@@ -8,7 +8,7 @@ and process signals. `config.ts` validates environment variables.
 | `transport/`   | Fastify HTTP and Socket.IO connections, later validation and safe delivery    | Application contracts; transport libraries                              |
 | `application/` | Match lookup, ordered ingress, serialization, idempotency, completion handoff | Domain and required ports; no Fastify, Socket.IO, or PostgreSQL imports |
 | `domain/`      | WAITING membership, Start and question deadline lifecycle                     | Pure TypeScript; no transport, persistence, or application imports      |
-| `persistence/` | PostgreSQL connection lifecycle, later durable adapters                       | PostgreSQL and required domain/application contracts                    |
+| `persistence/` | PostgreSQL connection lifecycle and Player/Credential adapter; later History  | PostgreSQL and required domain/application contracts                    |
 
 The application runtime owns the Registry, serialized admission and scheduling boundary. ESLint already
 restricts infrastructure imports under those paths. Define ports only when a
@@ -27,7 +27,7 @@ not authentication or gameplay rejections. Phase 1 stores participant IDs only;
 scores and other gameplay state are introduced with their actual behavior.
 
 Socket.IO attaches directly to Fastify's `server`, sharing its single HTTP listener.
-There are no gameplay handlers or authentication/session semantics yet. Health is
+There are no gameplay handlers or transport authentication/session semantics yet. Health is
 process liveness, not database readiness. Startup checks PostgreSQL with `SELECT 1`.
 
 Authority: [system design](../docs/system-design.md),
@@ -120,3 +120,12 @@ are discarded; FINISHED cancels timers. `shutdown()` stops admission, cancels
 scheduled work, drains admitted operations, then clears retained state/caches.
 Retention consumes process memory and provides no restart recovery. All runtime
 outcomes remain private and require future safe projections.
+
+Phase 4 Slice 1 adds the explicit `migrations/001_player_identity.sql` migration,
+`persistence/migrations.ts` runner and `PlayerRepository`. `player.id` is a
+server-generated UUID; `password_credential.player_id` is both PK and FK, and
+username has a UNIQUE constraint. `application/password.ts` hashes and verifies
+Argon2id; `authenticatePlayer` returns only a trusted Player profile or the same
+`invalid_credentials` result for unknown username and wrong password.
+`provisionPlayer` is for controlled internal/test setup, not a public endpoint.
+No schema is applied during backend startup; `npm run migrate` is explicit.
