@@ -399,8 +399,15 @@ Gateway / Timer → Coordinator → per-Match FIFO path → Engine
 
 Capture `receivedAt`, `receiptSequence`, and queue position synchronously without
 yielding. Different Matches execute independently. Processed retries return their
-established outcomes. Command-ID scope/retention must preserve that guarantee;
-the concrete retention strategy is not yet specified.
+established outcomes. Match-command retries use `(matchId, playerId, commandId)`;
+Create retries use a separate `(playerId, commandId)` namespace. In-flight
+duplicates share the established operation; completed duplicates replay the
+original receipt without re-execution. Retain completed Match aggregates and
+cached outcomes in process until shutdown, without TTL or durable restart recovery.
+Release idle queue resources and cancel obsolete timers. An execution exception
+without an established receipt creates no successful cached outcome; a post-commit
+scheduling failure does not invalidate the committed command's accepted receipt.
+No payload-conflict policy is implied.
 
 Only the Engine validates Host, phase, membership, attempts, deadlines, and scoring.
 
@@ -427,6 +434,16 @@ Do not admit deadline commands before their scheduled time. Stale/duplicate time
 are invalidated by current phase, played-question, and scheduled-deadline checks;
 cancellation is an optimization, not the correctness mechanism.
 Use a replaceable authoritative Clock for deterministic tests.
+
+When the Engine accepts a phase transition, the Coordinator commits the new
+authoritative state before attempting to schedule its next deadline. If scheduling
+fails, the committed state and original accepted receipt remain valid; record the
+separate infrastructure failure. The Match may stall without a deadline timer.
+Do not convert this failure into a domain rejection, roll back the transition,
+retry or reset the deadline automatically, or terminate the process solely for
+this failure. Ordinary operator-initiated shutdown or shutdown for unrelated
+reasons remains possible. Successful-path sequences in Section 6 omit this
+exceptional branch; active-Match process-restart recovery remains deferred.
 
 ### 4.6 Match Rules
 
@@ -463,6 +480,11 @@ Section 5 defines projections; reconnect policy remains deferred.
 | Authentication | Verify username/password hash; resolve durable Player identity for HTTP and realtime context |
 | Completed-Match repository | Validate and commit immutable `MatchResult` plus complete snapshot graph in one transaction |
 | History | Read committed own List and participation-authorized Detail |
+
+Player IDs are server-generated UUIDs represented as validated opaque strings at
+application boundaries. Credentials resolve to durable Player identity; password
+verification alone does not establish an HTTP or realtime session. Durable-schema
+migrations run explicitly outside normal backend startup.
 
 Persistence is required in M1, not optional. Identical retries succeed idempotently;
 conflicting results for the same Match identity fail. Neither persistence nor History
@@ -2075,6 +2097,8 @@ Gameplay stays `FINISHED`; see Section 6.9.
 - Commands: `commandId`, type, `matchId`, `playerId`, phase/version, outcome/error code.
 - Timing diagnostics: `receivedAt`, `receiptSequence`, deadline, `finalAnsweredMs`.
 - Transitions: Match identity, previous/next phase, resulting version.
+- Timer/clock infrastructure failures: Match identity and safe failure context;
+  runtime error-level reporting remains a Phase 4 integration follow-up.
 - Persistence failures: Match identity and failure context.
 - No passwords, hashes, secrets, credential payloads, unnecessary private data, or
   pre-reveal answer keys in ordinary logs/client errors.
@@ -2179,9 +2203,10 @@ reconstruction, and all phase transitions using controlled time.
   cursor behavior; retain the approved chronological physical access path.
 - Stored versus derived completed participant count.
 - Permanent source Question/Choice lineage; snapshots remain independently reconstructable.
-- Concrete command-ID scope/retention and authentication/session contract are not
-  specified here; preserve established idempotency and trusted identity guarantees.
-- Identifier representations and deletion/retention policy remain unfrozen in database design.
+- The authentication/session contract remains unspecified; preserve trusted identity
+  guarantees without inferring a session mechanism from password verification.
+- SQL identifier representations other than Player UUIDs, and deletion/retention
+  policy, remain unfrozen in database design.
 
 ### 10.2 Explicitly Deferred
 

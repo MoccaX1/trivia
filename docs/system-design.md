@@ -1147,6 +1147,15 @@ Stale or duplicate timer commands cannot mutate a newer Match state.
 
 Correctness comes from authoritative state validation rather than assuming timer cancellation wins races.
 
+If scheduling a deadline fails after an authoritative Match transition is committed,
+M1 preserves the committed state and the original accepted command receipt, and
+retains the infrastructure failure for diagnosis. Without that timer, the Match may
+stop progressing while the backend process remains alive. This accepted availability
+limitation does not relax gameplay correctness or deadline validation. Automatic
+timer retry, deadline extension, rollback, fatal shutdown for this failure, and
+active-Match recovery are not approved. Runtime operational reporting remains a
+Phase 4 integration responsibility; process-restart recovery is separately deferred.
+
 ### Question Provider Failure
 
 A Question Provider failure must not leave a partially opened or invalid authoritative round.
@@ -1275,7 +1284,7 @@ Tournament-specific persistence, scheduling, brackets, and qualification rules a
 
 | Area | Starting Choice | Why It Fits | Reconsideration Trigger |
 |---|---|---|---|
-| Backend | TypeScript with a small NestJS shell and framework-independent Match Engine | Structured application boundaries while keeping domain rules portable and testable. | Different runtime/team constraints or evidence that a smaller server framework is preferable. |
+| Backend | Node.js/TypeScript modular monolith with Fastify HTTP and a framework-independent Match Engine | Structured application boundaries while keeping domain rules portable and testable. | Different runtime/team constraints or evidence that another HTTP framework is preferable. |
 | Frontend | React + Vite | Small realtime client without SSR requirements. | Larger product shell, SSR, SEO, or different frontend requirements. |
 | Realtime | Socket.IO | Simple browser bidirectional communication and acknowledgements. | Need for lower-level protocol control or measured transport overhead. |
 | Active Match State | In-memory | One process and one authoritative Match owner keep runtime semantics simple. | Approved restart recovery or distributed ownership requirement. |

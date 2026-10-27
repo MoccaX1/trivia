@@ -48,27 +48,31 @@ Cardinality bounds and complete question/result coverage are validated at comple
 
 Logical names/keys below are contracts, not production migration SQL.
 Unless explicitly nullable/optional, listed durable fields are required (`NOT NULL`).
-Identifier SQL types and deletion/retention policies are not frozen.
+Player IDs and foreign keys referencing them use PostgreSQL `UUID`. Other SQL
+identifier types and deletion/retention policies are not frozen.
 
 ### 4.1 PLAYER
 
 ```text
-id               PK
+id               UUID, PK
 display_name     required presentation text
 ```
 
 Stable identity across authentication sessions. Display name is not login username.
-The exact ID representation remains an implementation decision.
+The trusted server generates Player IDs; application boundaries represent them as
+validated opaque strings.
 
 ### 4.2 PASSWORD_CREDENTIAL
 
 ```text
-player_id        PK, FK → PLAYER(id)
+player_id        UUID, PK, FK → PLAYER(id)
 username         UNIQUE, required
 password_hash    required
 ```
 
 Relationship: one Player has zero or one password credential.
+When provisioning a Player together with a password credential, both rows commit
+atomically or neither does. A Player may exist without a password credential.
 Store secure password hashes, never plaintext. Gameplay/History does not join
 credentials for identity. Email, OAuth, MFA, recovery, and generic credential
 linking are outside M1.
@@ -342,7 +346,8 @@ Only the Match Engine mutates authoritative live gameplay.
 
 ## 15. Open and Deferred Database Decisions
 
-- Identifier SQL types and retention/deletion policies.
+- SQL identifier types other than Player UUIDs, including Match and completed-History
+  identifiers, and retention/deletion policies.
 - External History cursor, page-size limits, response metadata, invalid-cursor behavior.
 - Stored versus derived completed participant count.
 - Permanent source Question/Choice lineage and any future source FK policy.
