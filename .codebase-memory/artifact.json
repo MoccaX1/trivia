@@ -1,12 +1,12 @@
 {
     "schema_version": 2,
-    "commit": "ee2f5ce9d50a4dd43c0a1f7b8b85f0fc546a2820",
-    "indexed_at": "2026-10-27T10:23:15Z",
+    "commit": "0b3fb90df9b5257bbcd5f93f9faa01ffcf6c9581",
+    "indexed_at": "2026-10-29T08:34:31Z",
     "project": "Trivia",
-    "nodes": 891,
-    "edges": 2187,
-    "original_size": 4390912,
-    "compressed_size": 673782,
+    "nodes": 933,
+    "edges": 2304,
+    "original_size": 4456448,
+    "compressed_size": 720088,
     "compression_level": 3,
     "reconcile_basis": "git-clean-head"
 }
