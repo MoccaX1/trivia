@@ -19,7 +19,14 @@ try {
     /^[A-Z0-9_]{1,32}$/.test(error.code)
       ? error.code
       : 'MIGRATION_FAILED';
-  console.error(`Migration failed: ${code}`);
+  const knownPreflight =
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    ['USERNAME_CANONICAL_COLLISION', 'USERNAME_INVALID_EXISTING'].includes(error.message)
+      ? error.message
+      : code;
+  console.error(`Migration failed: ${knownPreflight}`);
   process.exitCode = 1;
 } finally {
   if (pool) {

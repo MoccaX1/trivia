@@ -16,11 +16,15 @@ test(
         '--eval',
         `
     import { io } from 'socket.io-client';
+    import { testAuth, fixturePlayer } from './tests/support/auth.ts';
     import { createServer } from './src/transport/server.ts';
     for (const transport of ['polling', 'websocket']) {
-      const server = createServer();
+      const auth = testAuth();
+      const token = await auth.sessions.create(fixturePlayer);
+      const server = createServer({ auth });
       const address = await server.listen({ host: '127.0.0.1', port: 0 });
       const socket = io(address, {
+        extraHeaders: { Origin: 'http://localhost', Cookie: 'trivia_session=' + token },
         transports: [transport], reconnection: false, timeout: 2000, autoConnect: false,
       });
       await new Promise((resolve, reject) => {

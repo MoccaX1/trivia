@@ -22,18 +22,18 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 |---|---:|---:|---:|---:|
 | BUG | 0 | 0 | 3 | 3 |
 | LIM | 0 | 3 | 0 | 3 |
-| RISK | 3 | 0 | 0 | 3 |
+| RISK | 2 | 0 | 2 | 4 |
 | DEBT | 2 | 0 | 0 | 2 |
-| DEC | 13 | 0 | 0 | 13 |
-| TEST | 4 | 0 | 0 | 4 |
+| DEC | 9 | 0 | 4 | 13 |
+| TEST | 4 | 0 | 1 | 5 |
 | OPS | 3 | 0 | 0 | 3 |
-| DEF | 3 | 2 | 0 | 5 |
+| DEF | 2 | 2 | 1 | 5 |
 
-Total: **36** records; **5 ACCEPTED**, **28 OPEN**, **3 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **38** records; **5 ACCEPTED**, **22 OPEN**, **11 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
-Includes accepted limitations/exclusions; resolved history is in §9. Priority is UNDECIDED for every record.
+Includes accepted limitations/exclusions; resolved decisions/mitigations retain their detailed records in §6 and historical defects are in §9. Priority is UNDECIDED for every record.
 
 | ID | Concern | Status | Severity | Proposed target |
 |---|---|---|---|---|
@@ -43,15 +43,10 @@ Includes accepted limitations/exclusions; resolved history is in §9. Priority i
 | [OPS-001](#ops-001) | Runtime timer failure reporting is not integrated | OPEN | HIGH | before public deployment |
 | [OPS-002](#ops-002) | Production HTTPS, secret and deployment procedures are unspecified | OPEN | HIGH | before public deployment |
 | [OPS-003](#ops-003) | Health is liveness, not operational readiness | OPEN | MEDIUM | before public deployment |
-| [RISK-001](#risk-001) | Unknown username skips password verification | OPEN | MEDIUM | before public deployment |
-| [RISK-002](#risk-002) | Public login abuse controls are not present | OPEN | HIGH | before public deployment |
 | [RISK-003](#risk-003) | Private Engine outcomes must never be serialized directly | OPEN | HIGH | before public deployment |
+| [RISK-004](#risk-004) | Current dependency advisories remain unremediated | OPEN | HIGH | before public deployment |
 | [DEBT-001](#debt-001) | Repository guidance contains obsolete implementation descriptions | OPEN | LOW | later hardening |
 | [DEBT-002](#debt-002) | Competition ranking clarification is not fully in frozen baseline | OPEN | LOW | current demo |
-| [DEC-001](#dec-001) | Session storage and restart contract | OPEN | UNDETERMINED | before public deployment |
-| [DEC-002](#dec-002) | Session expiration, revocation and concurrent sessions | OPEN | UNDETERMINED | before public deployment |
-| [DEC-003](#dec-003) | Cookie, Origin, CSRF, HTTPS and handshake contract | OPEN | HIGH | before public deployment |
-| [DEC-004](#dec-004) | Login bounds, throttling and enumeration mitigation | OPEN | HIGH | before public deployment |
 | [DEC-005](#dec-005) | Password creation policy remains undecided | OPEN | UNDETERMINED | undecided |
 | [DEC-006](#dec-006) | Host departure and active disconnect policy | OPEN | UNDETERMINED | future design |
 | [DEC-007](#dec-007) | Enabled earlyClose behavior | OPEN | UNDETERMINED | future design |
@@ -63,9 +58,8 @@ Includes accepted limitations/exclusions; resolved history is in §9. Priority i
 | [DEC-013](#dec-013) | Broader product and anti-cheat requirements | OPEN | UNDETERMINED | future design |
 | [TEST-001](#test-001) | Real PostgreSQL verification is conditional | OPEN | MEDIUM | current demo |
 | [TEST-002](#test-002) | Migration rollback and concurrent-run coverage is incomplete | OPEN | MEDIUM | before public deployment |
-| [TEST-003](#test-003) | Current dependency advisory status is unverified | OPEN | UNDETERMINED | before public deployment |
 | [TEST-004](#test-004) | Authenticated Match-to-History end-to-end verification absent | OPEN | HIGH | current demo |
-| [DEF-001](#def-001) | Trusted HTTP and Socket.IO session integration pending | OPEN | HIGH | current demo |
+| [TEST-005](#test-005) | Full-checkout manual scripts fail existing lint rules | OPEN | LOW | later hardening |
 | [DEF-002](#def-002) | Safe playable runtime composition remains pending | OPEN | HIGH | current demo |
 | [DEF-003](#def-003) | Completed persistence and authorized History pending | OPEN | HIGH | current demo |
 | [DEF-004](#def-004) | Account recovery and advanced authentication excluded | ACCEPTED | UNDETERMINED | future design |
@@ -159,28 +153,28 @@ Includes accepted limitations/exclusions; resolved history is in §9. Priority i
 
 <a id="risk-001"></a>
 
-### RISK-001 — Unknown username skips password verification
+### RISK-001 — Username timing discrepancy mitigated
 
-- **Category / status:** RISK / OPEN. **Severity / priority:** MEDIUM / UNDECIDED.
+- **Category / status:** RISK / RESOLVED. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Authentication; Slice 1/2. **Target:** before public deployment.
-- **Evidence:** [authenticatePlayer](../src/application/authenticate-player.ts); [identity tests](../tests/player-identity.test.ts).
-- **Concern:** Missing credentials return invalid_credentials before Argon2 verification; wrong passwords perform verification.
-- **Policy / status:** Response values match; timing mitigation is unapproved and absent.
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [authenticatePlayer](../src/application/authenticate-player.ts); [identity tests](../tests/player-identity.test.ts).
+- **Concern (historical baseline before Slice 2):** Missing credentials return invalid_credentials before Argon2 verification; wrong passwords perform verification.
+- **Policy / status:** Slice 2 adds compatible-cost dummy Argon2id verification for unknown usernames and generic 401 responses. tests/login.test.ts and tests/authentication.test.ts verify the path and response equivalence; no perfect timing-equality guarantee is claimed.
 - **Impact:** A public login endpoint could allow statistical username enumeration. No public login exists yet.
-- **Next action:** Approve a same-cost verification strategy and test behavior without claiming constant network timing.
+- **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** DEC-004, DEF-001.
 
 <a id="risk-002"></a>
 
-### RISK-002 — Public login abuse controls are not present
+### RISK-002 — Login abuse controls implemented
 
-- **Category / status:** RISK / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** RISK / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Authentication/transport; Slice 2. **Target:** before public deployment.
-- **Evidence:** [System §17](system-design.md#17-security-and-fairness); [server](../src/transport/server.ts); [authentication](../src/application/authenticate-player.ts).
-- **Concern:** No login route, login-specific bounds, throttling, or credential-stuffing controls are implemented.
-- **Policy / status:** Server input bounds and abuse limiting are required; exact policies remain open.
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [System §17](system-design.md#17-security-and-fairness); [server](../src/transport/server.ts); [authentication](../src/application/authenticate-player.ts).
+- **Concern (historical baseline before Slice 2):** No login route, login-specific bounds, throttling, or credential-stuffing controls are implemented.
+- **Policy / status:** Slice 2 implements canonical failure/IP windows, fail-fast concurrency limits, bounded keys and cleanup. Deterministic service/HTTP tests cover boundary, expiry, outage and saturation behavior. Distributed attackers and production tuning remain hardening concerns.
 - **Impact:** Public password verification without controls permits guessing and CPU/memory abuse.
-- **Next action:** Approve limits and source/proxy identity handling before exposing login. CAPTCHA is not an approved requirement.
+- **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** DEC-004, DEC-005.
 
 <a id="risk-003"></a>
@@ -195,6 +189,28 @@ Includes accepted limitations/exclusions; resolved history is in §9. Priority i
 - **Impact:** Direct forwarding would leak answers/private data and mishandle bigint JSON. No gameplay transport currently exposes these objects.
 - **Next action:** Require projection tests and explicit DTO construction before Gateway integration.
 - **Related:** DEF-002.
+
+<a id="risk-004"></a>
+
+### RISK-004 — Current dependency advisories remain unremediated
+
+- **Category / status:** RISK / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Component / phase:** Runtime and development dependencies; Slice 2 verification. **Target:** before public deployment.
+- **Evidence:** npm audit --json executed during Slice 2; [lockfile](../package-lock.json).
+- **Concern:** 15 dependency entries flagged: 1 low, 13 moderate, 1 high; includes propagated dependency findings, not 15 distinct incidents. Runtime image install reported 2 findings (low/moderate); the high finding is development/release dependency undici.
+- **Policy / status:** No unrelated upgrades applied. New direct dependency tldts 7.4.19 provides PSL-aware same-site checks and was not flagged in this audit.
+- **Impact:** Runtime/development exposure depends on advisory conditions; no exploitation is asserted.
+- **Next action:** Review and patch compatible dependencies in a focused change; revalidate pinned release tooling before any version change. npm suggestions include major/downgrade changes and must not be applied blindly.
+- **Related:** TEST-003.
+
+| Package / installed version | Audit severity | Advisory references | Remediation status |
+|---|---|---|---|
+| fast-uri 4.2.1; nested ajv copy 3.1.8 | moderate | [GHSA-333x-w4r6-6crp](https://github.com/advisories/GHSA-333x-w4r6-6crp), [GHSA-w74x-v6f9-j3xg](https://github.com/advisories/GHSA-w74x-v6f9-j3xg), [GHSA-wjr9-j795-jxcr](https://github.com/advisories/GHSA-wjr9-j795-jxcr), [GHSA-xhq7-xmqj-769h](https://github.com/advisories/GHSA-xhq7-xmqj-769h) | Open; no remediation applied |
+| fastify 5.12.5 | low | [GHSA-389g-gv7q-r4x8](https://github.com/advisories/GHSA-389g-gv7q-r4x8) | Open; no remediation applied |
+| minimatch 10.2.6 | moderate | [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249) | Open; no remediation applied |
+| undici 7.29.1 | high | [GHSA-2m5v-pch6-74hx](https://github.com/advisories/GHSA-2m5v-pch6-74hx), [GHSA-4qv8-2p9j-2685](https://github.com/advisories/GHSA-4qv8-2p9j-2685), [GHSA-4w7w-5xrc-9h26](https://github.com/advisories/GHSA-4w7w-5xrc-9h26), [GHSA-55wc-3pg8-jfw6](https://github.com/advisories/GHSA-55wc-3pg8-jfw6), [GHSA-9fm3-97px-rjf6](https://github.com/advisories/GHSA-9fm3-97px-rjf6), [GHSA-f72v-6w45-q472](https://github.com/advisories/GHSA-f72v-6w45-q472), [GHSA-qrxm-fqhp-jwvm](https://github.com/advisories/GHSA-qrxm-fqhp-jwvm), [GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c) | Open; no remediation applied |
+
+Propagated moderate entries: `@eslint-community/eslint-utils` 4.10.1, `@eslint/config-array` 0.23.5, `@eslint/js` 10.0.1, `@typescript-eslint/eslint-plugin` 8.71.1, `@typescript-eslint/parser` 8.71.1, `@typescript-eslint/type-utils` 8.71.1, `@typescript-eslint/typescript-estree` 8.71.1, `@typescript-eslint/utils` 8.71.1, `eslint` 10.12.0, `release-it` 21.1.1, `typescript-eslint` 8.71.1. Each is attributed by npm to the dependency graph above rather than a separate direct advisory.
 
 ### DEBT records
 
@@ -228,54 +244,54 @@ Includes accepted limitations/exclusions; resolved history is in §9. Priority i
 
 <a id="dec-001"></a>
 
-### DEC-001 — Session storage and restart contract
+### DEC-001 — Session storage and restart contract decided
 
-- **Category / status:** DEC / OPEN. **Severity / priority:** UNDETERMINED / UNDECIDED.
+- **Category / status:** DEC / RESOLVED. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Authentication; Slice 2. **Target:** before public deployment.
-- **Evidence:** [LLD §§4.9,5.7,10.1](low-level-design.md#57-http-api); [DFD §1](Data_Flow_Diagram.md#1-authentication-flow).
-- **Concern:** Password verification establishes no HTTP or realtime session.
-- **Policy / status:** Process-local opaque, PostgreSQL opaque, and signed-token approaches have not been approved in repository records.
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [LLD §§4.9,5.7,10.1](low-level-design.md#57-http-api); [DFD §1](Data_Flow_Diagram.md#1-authentication-flow).
+- **Concern (historical baseline before Slice 2):** Password verification establishes no HTTP or realtime session.
+- **Policy / status:** Approved Slice 2: process-local opaque server-side sessions, SHA-256 token digests and 256-bit random tokens. Restart loses sessions; durable Player identity survives.
 - **Impact:** Determines revocation, restart behavior, schema and runtime dependencies.
-- **Next action:** Approve the session mechanism before implementation; process-local recommendation from current discussion remains a proposal.
+- **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** DEF-001.
 
 <a id="dec-002"></a>
 
-### DEC-002 — Session expiration, revocation and concurrent sessions
+### DEC-002 — Session lifecycle and activity contract decided
 
-- **Category / status:** DEC / OPEN. **Severity / priority:** UNDETERMINED / UNDECIDED.
+- **Category / status:** DEC / RESOLVED. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Authentication/socket lifecycle; Slice 2. **Target:** before public deployment.
-- **Evidence:** [LLD §§5.7,10.1](low-level-design.md#101-open-questions).
-- **Concern:** No expiration durations, rotation, logout scope, concurrent-session rules or existing-socket revocation semantics are frozen.
-- **Policy / status:** No sessions exist.
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [LLD §§5.7,10.1](low-level-design.md#101-open-questions).
+- **Concern (historical baseline before Slice 2):** No expiration durations, rotation, logout scope, concurrent-session rules or existing-socket revocation semantics are frozen.
+- **Policy / status:** Approved Slice 2: 30-minute idle, 12-hour absolute; intentional authenticated actions alone refresh idle. Independent sessions coexist; logout revokes current session and closes its sockets. Future synchronous Gateway admission remains DEF-002.
 - **Impact:** Long-lived sockets need explicit authorization validity; logout must have defined scope.
-- **Next action:** Approve exact lifecycle including shutdown and authentication-only reconnect. Proposed numeric durations are not requirements.
+- **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** DEC-001, DEC-003.
 
 <a id="dec-003"></a>
 
-### DEC-003 — Cookie, Origin, CSRF, HTTPS and handshake contract
+### DEC-003 — Cookie, Origin and handshake contract decided
 
-- **Category / status:** DEC / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** DEC / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** HTTP/Socket.IO; Slice 2. **Target:** before public deployment.
-- **Evidence:** [LLD §§5.2,5.7](low-level-design.md#52-realtime-command-envelope); [server](../src/transport/server.ts); [System §17](system-design.md#17-security-and-fairness).
-- **Concern:** Transport mechanism, route DTOs, browser origins, cookie attributes and handshake protection remain unspecified.
-- **Policy / status:** Trusted Player context is required; client payload identity is prohibited.
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [LLD §§5.2,5.7](low-level-design.md#52-realtime-command-envelope); [server](../src/transport/server.ts); [System §17](system-design.md#17-security-and-fairness).
+- **Concern (historical baseline before Slice 2):** Transport mechanism, route DTOs, browser origins, cookie attributes and handshake protection remain unspecified.
+- **Policy / status:** Approved Slice 2: HTTPS __Host cookie, strict configured Origin/JSON demo CSRF posture, same-site credentialed CORS, explicit trusted proxies, actual-loopback development exception; polling and WebSocket authenticate server-session identity. Approved safe-GET clarification: /auth/profile allows absent Origin without Referer; present null/disallowed origins reject. Sessions, no idle refresh and no-store remain mandatory. POST login/logout and Socket.IO keep mandatory Origin. No frontend topology is selected.
 - **Impact:** Unsafe browser defaults could enable credential theft, request forgery or unauthorized socket access.
-- **Next action:** Approve exact HTTP routes/statuses, credential presentation, Origin checks, local exceptions and socket revalidation before coding.
+- **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** DEC-001, OPS-002.
 
 <a id="dec-004"></a>
 
-### DEC-004 — Login bounds, throttling and enumeration mitigation
+### DEC-004 — Login resource and abuse policy decided
 
-- **Category / status:** DEC / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** DEC / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Authentication security; Slice 2. **Target:** before public deployment.
-- **Evidence:** [System §17](system-design.md#17-security-and-fairness); [LLD §8](low-level-design.md#8-error--validation-model); [authentication](../src/application/authenticate-player.ts).
-- **Concern:** Exact input sizes, Unicode handling, rate keys/windows and timing strategy are not frozen.
-- **Policy / status:** Generic credential failure exists internally; no public login controls yet.
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [System §17](system-design.md#17-security-and-fairness); [LLD §8](low-level-design.md#8-error--validation-model); [authentication](../src/application/authenticate-player.ts).
+- **Concern (historical baseline before Slice 2):** Exact input sizes, Unicode handling, rate keys/windows and timing strategy are not frozen.
+- **Policy / status:** Approved Slice 2: 4 KiB JSON, exact fields, ASCII canonical username 1–128 bytes, unchanged password 1–1024 UTF-8 bytes; 60 attempts/IP and 10 credential failures/name per 15 minutes, at most four concurrent verifications and no queue. This does not decide password-creation policy.
 - **Impact:** Policy affects abuse resistance, resource use and legitimate clients.
-- **Next action:** Approve input and rate limits separately from password creation policy; do not treat discussion numbers as approved.
+- **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** RISK-001, RISK-002.
 
 <a id="dec-005"></a>
@@ -417,23 +433,23 @@ Includes accepted limitations/exclusions; resolved history is in §9. Priority i
 - **Category / status:** TEST / OPEN. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Migration runner; Slice 1. **Target:** before public deployment.
 - **Evidence:** [runner](../src/persistence/migrations.ts); [identity tests](../tests/player-identity.test.ts).
-- **Concern:** Runner uses one transaction, advisory lock and checksums. Tests repeat normal migration execution and test provisioning rollback; they do not inject a failing migration or concurrent migration runs.
-- **Policy / status:** Safety mechanisms exist; migration-failure/concurrency verification is incomplete.
+- **Concern:** Runner uses one transaction, advisory lock and checksums. Tests repeat normal migration execution and test provisioning rollback; Slice 2 now tests migration 002 collision/invalid-value rollback, ledger integrity and concurrent runs; generalized failure injection after arbitrary migration writes remains untested.
+- **Policy / status:** Migration 002 safety and concurrency now have real PostgreSQL coverage. This record retains only broader migration-failure injection coverage beyond preflight failures.
 - **Impact:** Migration regressions could escape normal-path tests.
 - **Next action:** Add isolated failing/concurrent migration cases when authorized; distinguish provisioning rollback from migration rollback.
 - **Related:** TEST-001.
 
 <a id="test-003"></a>
 
-### TEST-003 — Current dependency advisory status is unverified
+### TEST-003 — Dependency advisory status verified
 
-- **Category / status:** TEST / OPEN. **Severity / priority:** UNDETERMINED / UNDECIDED.
+- **Category / status:** TEST / RESOLVED. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Dependencies/release; bootstrap onward. **Target:** before public deployment.
-- **Evidence:** [README release tooling](../README.md); [manifest](../package.json); [lockfile](../package-lock.json).
-- **Concern:** README records a targeted basic-ftp override; manifest pins that override to 6.2.3. No saved npm-audit report or current advisory query was available in this review.
-- **Policy / status:** No exact current advisory, vulnerable installed version or clean-audit claim is established.
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [README release tooling](../README.md); [manifest](../package.json); [lockfile](../package-lock.json).
+- **Concern (historical baseline before Slice 2):** README records a targeted basic-ftp override; manifest pins that override to 6.2.3. No saved npm-audit report or current advisory query was available in this review.
+- **Policy / status:** An npm audit --json run during Slice 2 confirmed 15 flagged dependency entries (1 low, 13 moderate, 1 high); exact installed roots and advisory links are retained in RISK-004. This closes audit availability only, not remediation.
 - **Impact:** Exposure and remediation completeness cannot be quantified from override presence alone.
-- **Next action:** Run a current npm audit against the lockfile and record package/version/advisory/severity/remediation; do not invent a historical incident.
+- **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** —.
 
 <a id="test-004"></a>
@@ -449,19 +465,32 @@ Includes accepted limitations/exclusions; resolved history is in §9. Priority i
 - **Next action:** After required integrations, test two authenticated Players through FINISHED, atomic persistence and authorized History.
 - **Related:** DEF-001, DEF-002, DEF-003.
 
+<a id="test-005"></a>
+
+### TEST-005 — Full-checkout manual scripts fail existing lint rules
+
+- **Category / status:** TEST / OPEN. **Severity / priority:** LOW / UNDECIDED.
+- **Component / phase:** Developer verification; Phase 3 manual scripts/Slice 2. **Target:** later hardening.
+- **Evidence:** [manual deadline](../manual-deadline-test.ts), [scheduler failure](../manual-scheduler-failure-test.ts), [shutdown](../manual-shutdown-test.ts); full-checkout npm run check executed in mounted Docker workspace.
+- **Concern:** Five pre-existing unused underscore-prefixed parameter lint errors stop full-checkout check. Official tools image does not copy these root manual scripts, so its full check passes.
+- **Policy / status:** Manual scripts and lint rules left unchanged to preserve slice scope. This is distinct from new authentication verification.
+- **Impact:** Native/full-checkout check and official image check cover different files.
+- **Next action:** Approve focused manual-script lint cleanup or an explicit verification-scope rule; do not claim the full checkout passed.
+- **Related:** DEBT-001.
+
 ### DEF records
 
 <a id="def-001"></a>
 
-### DEF-001 — Trusted HTTP and Socket.IO session integration pending
+### DEF-001 — Trusted HTTP and Socket.IO sessions integrated
 
-- **Category / status:** DEF / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** DEF / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Transport/authentication; Slice 2. **Target:** current demo.
-- **Evidence:** [LLD §§4.2,5.7](low-level-design.md#57-http-api); [server](../src/transport/server.ts); [main](../src/main.ts).
-- **Concern:** Only health and unauthenticated connectivity are exposed; internal verification is not wired into transports.
-- **Policy / status:** Slice 2 design approval precedes code; no public registration.
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [LLD §§4.2,5.7](low-level-design.md#57-http-api); [server](../src/transport/server.ts); [main](../src/main.ts).
+- **Concern (historical baseline before Slice 2):** Only health and unauthenticated connectivity are exposed; internal verification is not wired into transports.
+- **Policy / status:** Slice 2 wires the PostgreSQL verifier and SessionStore into main, HTTP routes and polling/WebSocket authentication. Tests exercise real listeners, origins, logout/expiry and session isolation. Gameplay Gateway commands remain DEF-002, not completed by handshake authentication.
 - **Impact:** Current server is not an authenticated playable application.
-- **Next action:** Implement approved sessions and trusted context after decisions; no gameplay recovery.
+- **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** DEC-001, DEC-002, DEC-003.
 
 <a id="def-002"></a>
@@ -524,7 +553,7 @@ Stale/cancelled callbacks are **design-compliant informational behavior**, not a
 
 ## 8. Deferred design decisions and future recovery considerations
 
-DEC-001–005 cover unapproved session/security policy; discussion recommendations (process-local opaque cookies, proposed expiry durations, numeric login bounds and rate windows) remain unapproved. DEC-006–013 capture gameplay, persistence, capacity, content and recovery gaps. No automatic retries, rollback, deadline extensions or fatal shutdown policy follows from this registry.
+DEC-001–004 are decided by the approved Slice 2 contract in LLD §5.7; DEC-005 password-creation policy remains open. Earlier discussion recommendations were superseded only by explicit Slice 2 approval. DEC-006–013 capture gameplay, persistence, capacity, content and recovery gaps. No automatic retries, rollback, deadline extensions or fatal shutdown policy follows from this registry.
 
 Recovery design must address accepted submissions, attempts, timing, exact scores, command idempotency, timer reconciliation and fairness during inability to submit. Distinguish in-process scheduler failure from process restart. Restoration alone does not authorize resume, abort, compensation or a new deadline (DEC-012).
 
@@ -585,13 +614,13 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 | Manual runtime review | [create](../manual-create-test.ts), [deadline](../manual-deadline-test.ts), [timer](../manual-timer-test.ts), [shutdown](../manual-shutdown-test.ts), [stale callback](../manual-stale-timer-test.ts), [scheduler failure](../manual-scheduler-failure-test.ts) | Executable assertions are evidence of intended checks, not archived execution logs. No rerun or pass claim in this task. |
 | Slice 1 | 1611d46; [migration](../migrations/001_player_identity.sql), [identity tests](../tests/player-identity.test.ts) | Player UUID, credential separation, Argon2id and explicit migrations implemented; conditional PostgreSQL coverage noted. |
 | Reconciliation | 0b3fb90; System §16/§20, LLD §4.3/4.5/4.9/8.7/10.1, Database §4/§15 | Scheduler limitation, idempotency retention and UUID/provisioning contracts are now recorded; not all SQL types settled. |
-| Slice 2 discussion | LLD §10.1 remains open; current review supplies recommendations only | No committed session decision record. Current conversation is not proof of inaccessible historical approvals. |
+| Slice 2 discussion | Approved Slice 2 task and reconciled LLD §5.7; authentication/session/migration tests | Session/security decisions now recorded. No gameplay Gateway/rejoin or password-creation policy is implied. |
 
 Reviewed available Git history from the first commit through 0b3fb90, source/test/migration inventory, design sections, README/operations guidance and manual scripts. No dedicated historical audit reports or saved test-result/advisory logs were found among repository files inspected. External ChatGPT/Codex sessions cannot be recovered from this checkout; complete historical coverage cannot be claimed. No matching TODO/FIXME comments were found in the tracked project text search; absence of comments is not evidence of absence of issues.
 
-Verified contracts worth preserving: server-generated Player UUIDs; native UUID Player FKs; atomic provisioning; explicit checksum-tracked migrations; no plaintext credential persistence; explicit decoded database configuration; pure immutable Engine; mutation-only versions; exact bigint scoring; per-Match synchronous FIFO admission; safe timeout validation; exception-safe queues and shutdown. Tests were inspected, not executed for this documentation task. No present BUG is asserted without a verified violation.
+Verified contracts worth preserving: server-generated Player UUIDs; native UUID Player FKs; atomic provisioning; explicit checksum-tracked migrations; no plaintext credential persistence; explicit decoded database configuration; pure immutable Engine; mutation-only versions; exact bigint scoring; per-Match synchronous FIFO admission; safe timeout validation; exception-safe queues and shutdown. The initial registry task inspected tests without executing them; Slice 2 subsequently executed the Docker full check with real PostgreSQL enabled (141 passed, zero skipped), including session/migration regressions. No present BUG is asserted without a verified violation.
 
-Graph coverage for src/tests/migrations reported no recorded gaps (best-effort metadata); direct source reads supplied material behavior evidence. No reindexing was requested. Two .codebase-memory files were already modified at task entry and were left alone. No migrations, runtime operations or dependency audit were executed. TEST-003 is a verification gap, not a claim that vulnerabilities currently exist.
+Graph coverage for src/tests/migrations reported no recorded gaps (best-effort metadata); direct source reads supplied material behavior evidence. No reindexing was requested. Two .codebase-memory files were already modified at task entry and were left alone. The initial registry task ran no migrations/runtime/audit. Slice 2 used isolated PostgreSQL fixtures and captured a current dependency audit; RISK-004 records unresolved findings.
 
 ## 11. Maintenance rules
 

@@ -7,6 +7,9 @@ const fixture = `
   import { once } from 'node:events';
   import { createServer as createTcpServer } from 'node:net';
   import { io } from 'socket.io-client';
+  import { testAuth, fixturePlayer } from './tests/support/auth.ts';
+  const auth = testAuth();
+  const token = await auth.sessions.create(fixturePlayer);
   import { Server as SocketIOServer } from 'socket.io';
   import { readConfig } from './src/config.ts';
   import { connectPostgres } from './src/persistence/postgres.ts';
@@ -24,7 +27,7 @@ const fixture = `
     this.engine.cleanup = () => { realtimeCloses++; cleanup(); };
     return attached;
   };
-  const server = createServer({ logger: { level: 'info' } });
+  const server = createServer({ logger: { level: 'info' }, auth });
   SocketIOServer.prototype.attach = attach;
   const database = connectPostgres(config.database);
   const order = [];
@@ -148,7 +151,7 @@ test(
     assert.equal((await fetch(address + '/health')).status, 200);
     const clients = [];
     for (const transport of ['polling', 'websocket']) {
-      const socket = io(address, { transports: [transport], reconnection: false, autoConnect: false, timeout: 2000 });
+      const socket = io(address, { extraHeaders: { Origin: 'http://localhost', Cookie: 'trivia_session=' + token }, transports: [transport], reconnection: false, autoConnect: false, timeout: 2000 });
       await new Promise((resolve, reject) => { socket.once('connect', resolve); socket.once('connect_error', reject); socket.connect(); });
       clients.push(socket);
     }

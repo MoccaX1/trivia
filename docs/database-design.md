@@ -66,13 +66,23 @@ validated opaque strings.
 
 ```text
 player_id        UUID, PK, FK → PLAYER(id)
-username         UNIQUE, required
+username         canonical ASCII lowercase, UNIQUE, required
 password_hash    required
 ```
 
 Relationship: one Player has zero or one password credential.
 When provisioning a Player together with a password credential, both rows commit
 atomically or neither does. A Player may exist without a password credential.
+Usernames use ASCII letters/digits/underscore/hyphen/period, 1–128 UTF-8 bytes;
+authentication and uniqueness are case-insensitive through lowercase canonical
+storage. Migration 002 checks legacy collisions/invalid values transactionally,
+then canonicalizes and adds a CHECK constraint while retaining UNIQUE(username).
+It never merges/deletes accounts or changes migration 001/Player UUIDs. Player
+provisioning validates Unicode display names at 1–64 extended grapheme clusters,
+rejecting blank/unsafe controls without trimming stored input. Legacy display rows
+remain untouched; no incompatible ICU-dependent SQL constraint is introduced.
+Process-local sessions add no durable table. Password-creation policy stays open.
+
 Store secure password hashes, never plaintext. Gameplay/History does not join
 credentials for identity. Email, OAuth, MFA, recovery, and generic credential
 linking are outside M1.

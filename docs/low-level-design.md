@@ -1252,7 +1252,54 @@ Conceptual access contracts:
 | Own History List | Query that Player's committed participations; newest first by `finishedAt DESC, matchId DESC`; SQL-limited results |
 | History Detail | Verify requesting Player participated before returning summary, scoreboard, ordered snapshots, and own question results |
 
-Exact authentication/session mechanism and final HTTP DTOs are not specified here.
+#### Approved authentication/session contract (Phase 4 Slice 2)
+
+- `POST /auth/login`: exact JSON username/password strings; 4 KiB body, ASCII
+  username 1–128 bytes, password 1–1024 UTF-8 bytes without trimming/normalization.
+  Canonicalize username to ASCII lowercase consistently at provisioning, lookup,
+  database storage and rate-limit boundaries. Display names use Intl.Segmenter for
+  1–64 extended graphemes, preserve input, and reject blank/unsafe controls.
+- Success: 200 `{ player: { id, displayName } }` and a new independent session cookie.
+  Wrong/unknown credentials: identical 401 INVALID_CREDENTIALS, with compatible-cost
+  dummy Argon2id verification for unknown usernames. Malformed/oversized inputs run
+  no verification. Infrastructure failure and saturation are 503, never a domain
+  rejection or credential failure. Public responses/logs contain no credential material.
+- `POST /auth/logout`: valid current session plus JSON; revoke that session, clear
+  matching cookie attributes, disconnect associated sockets, 204. Invalid session: 401.
+  `GET /auth/profile`: valid session returns public Player only, otherwise 401;
+  automatic profile polling never refreshes idle. Auth responses use no-store.
+- SessionStore owns opaque CSPRNG 256-bit tokens, process-local server authority,
+  30-minute sliding idle and 12-hour absolute expiration. Digest keys avoid storing
+  raw bearer tokens. Independent sessions coexist; restart loses sessions. Timely
+  cleanup removes expired entries and session/socket associations. No JWT/refresh flow.
+- Resolve/watch never refresh activity. An intentional-action operation performs
+  its final validity check and invokes the supplied admission callback without yielding.
+  A future Gateway must synchronously admit through Coordinator inside that callback;
+  Engine rejection may still count as activity. Revocation/expiry rejects new actions
+  and disconnects sockets but never cancels already admitted commands. Heartbeats,
+  background polling, passive presence and failed authentication do not refresh idle.
+- HTTPS cookie: `__Host-trivia_session`, Path=/, HttpOnly, Secure, SameSite=Lax,
+  no Domain. Explicit non-production actual-loopback mode uses `trivia_session`
+  without Secure; other insecure peers/deployments reject.
+- Exact configured normalized browser Origin allowlist and JSON-only state-changing
+  auth endpoints implement the approved demo CSRF posture. Reject missing/null
+  Origin; no wildcard reflection. The sole safe-GET exception is `/auth/profile`: absent
+  Origin is allowed without Referer, while present null/disallowed origins reject.
+  Session authentication, read-only behavior, no idle refresh and no-store remain
+  mandatory. Login/logout and all Socket.IO handshakes still require Origin. Credentialed preflight supports approved same-site
+  cross-origin deployments, with no assumed frontend topology. Secure mode uses
+  public-suffix-aware schemeful site validation and rejects cross-site configurations.
+  HTTPS and Origin configuration are mandatory; trust forwarded IP/TLS only through
+  explicit configured trusted-proxy addresses. Both polling and WebSocket enforce
+  Origin and cookie authentication; client handshake identity fields are not authority.
+- Sliding 15-minute limits: 60 login attempts/trusted client IP, 10 credential failures
+  per canonical username. Unknown usernames count; success never erases history and
+  database outages do not count as credential failures. 429 RATE_LIMITED for limits.
+  At most four concurrent lookup/verification operations, no queue; saturation returns
+  503 with Retry-After. Expire stale limiter data and bound key/cardinality growth.
+
+These are login resource bounds, not a password-creation policy. Gameplay Gateway,
+active reconnect/rejoin, registration and password recovery are outside this slice.
 History cursor format remains open. Do not create an HTTP gameplay bypass or expose
 mutable current Question Bank content as historical facts.
 
@@ -2203,8 +2250,7 @@ reconstruction, and all phase transitions using controlled time.
   cursor behavior; retain the approved chronological physical access path.
 - Stored versus derived completed participant count.
 - Permanent source Question/Choice lineage; snapshots remain independently reconstructable.
-- The authentication/session contract remains unspecified; preserve trusted identity
-  guarantees without inferring a session mechanism from password verification.
+- Authentication/session decisions are settled in §5.7; password-creation policy remains open.
 - SQL identifier representations other than Player UUIDs, and deletion/retention
   policy, remain unfrozen in database design.
 

@@ -1207,6 +1207,34 @@ Telemetry must not block or change gameplay state.
 - Avoid exposing answer keys through transport errors, projections, or ordinary logs.
 - Make answer acceptance, score, ranking, and tied-result handling deterministic and auditable.
 
+### Approved M1 authentication/session boundary (Phase 4 Slice 2)
+
+Username identity is ASCII `[A-Za-z0-9_.-]`, 1–128 UTF-8 bytes, case-insensitive
+with lowercase canonical storage and database-enforced uniqueness. Durable UUID
+Player identity remains separate. Unicode display names allow 1–64 extended
+grapheme clusters and preserve spaces/composition; blank/unsafe controls reject.
+
+M1 uses opaque process-local server sessions with 256-bit random bearer tokens,
+30-minute sliding idle and 12-hour absolute expiration. Multiple sessions coexist;
+logout revokes only the current session; restart requires login. Only intentional
+authenticated application actions refresh idle, never polling or heartbeats.
+
+HTTP login/logout/profile and Socket.IO resolve identity from the server session.
+Cookies are HttpOnly, host-only, Path=/, SameSite=Lax and Secure with the __Host-
+prefix under HTTPS. Explicit local non-production loopback mode is the sole insecure
+exception. Exact configured Origin validation, JSON-only state-changing auth actions
+and credentialed CORS support same-origin or approved cross-origin same-site topology;
+true cross-site credentialed deployment is excluded. Safe read-only GET /auth/profile
+permits absent Origin without Referer, but validates every present Origin and rejects
+null/disallowed values. It still requires a session, never refreshes idle and uses
+no-store. Login/logout and all Socket.IO handshakes require Origin. Production fails closed without
+HTTPS/origin configuration. Browser Origin checks also cover WebSocket handshakes.
+
+Authentication must be valid immediately before Coordinator admission; no asynchronous
+gap is allowed between the final check and admission. Later expiration/logout does
+not cancel admitted commands. Gameplay reconnect/rejoin remains separately deferred.
+See LLD §5.7 for bounds, abuse accounting, error and session lifecycle details.
+
 Anti-cheat depth and dispute/audit requirements beyond these boundaries remain open product decisions.
 
 ## 18. Scalability Approach

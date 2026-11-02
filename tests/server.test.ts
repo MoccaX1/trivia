@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { io } from 'socket.io-client';
+import { testAuth, fixturePlayer } from './support/auth.js';
 import { createServer } from '../src/transport/server.js';
 
 test(
@@ -24,10 +25,13 @@ for (const transport of ['polling', 'websocket']) {
     `Socket.IO ${transport} shares HTTP port and disconnects on shutdown`,
     { timeout: 10_000 },
     async (t) => {
-      const server = createServer();
+      const auth = testAuth();
+      const token = await auth.sessions.create(fixturePlayer);
+      const server = createServer({ auth });
       t.after(() => server.close());
       const address = await server.listen({ host: '127.0.0.1', port: 0 });
       const socket = io(address, {
+        extraHeaders: { Origin: 'http://localhost', Cookie: `trivia_session=${token}` },
         transports: [transport],
         reconnection: false,
         timeout: 2_000,

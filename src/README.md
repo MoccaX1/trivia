@@ -27,7 +27,7 @@ not authentication or gameplay rejections. Phase 1 stores participant IDs only;
 scores and other gameplay state are introduced with their actual behavior.
 
 Socket.IO attaches directly to Fastify's `server`, sharing its single HTTP listener.
-There are no gameplay handlers or transport authentication/session semantics yet. Health is
+There are no gameplay handlers yet. HTTP login/logout/profile and Socket.IO cookie authentication now resolve trusted session identity; see the root README authentication contract. Health is
 process liveness, not database readiness. Startup checks PostgreSQL with `SELECT 1`.
 
 Authority: [system design](../docs/system-design.md),
@@ -129,3 +129,9 @@ Argon2id; `authenticatePlayer` returns only a trusted Player profile or the same
 `invalid_credentials` result for unknown username and wrong password.
 `provisionPlayer` is for controlled internal/test setup, not a public endpoint.
 No schema is applied during backend startup; `npm run migrate` is explicit.
+
+Slice 2 exposes SessionStore.resolve/watch without idle refresh, and act(token,
+callback) for intentional activity. The memory implementation checks validity and
+invokes the callback without yielding. Future Gateway admission must occur inside
+that callback, with no intervening await; already-admitted commands survive later
+revocation. Socket authentication alone does not implement gameplay Gateway or rejoin.

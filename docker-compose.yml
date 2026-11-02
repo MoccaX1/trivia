@@ -7,6 +7,10 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      AUTH_COOKIE_MODE: ${AUTH_COOKIE_MODE:-secure}
+      AUTH_PUBLIC_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-}
+      AUTH_ORIGINS: ${AUTH_ORIGINS:-}
+      AUTH_TRUST_PROXY: ${AUTH_TRUST_PROXY:-}
       DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql://trivia:trivia_local@postgres:5432/trivia}
     ports:
       - '127.0.0.1:${PORT:-3000}:3000'

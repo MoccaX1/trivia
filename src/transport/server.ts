@@ -1,10 +1,71 @@
-import Fastify from 'fastify';
+import Fastify, { LogController } from 'fastify';
+import type { Writable } from 'node:stream';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from 'socket.io';
+import { installAuthentication } from './authentication.js';
+import type { Authentication } from './authentication.js';
+import { allowedOrigin, secureRequest } from './auth-policy.js';
 
-export function createServer({ logger = false }: { logger?: boolean | { level: string } } = {}) {
-  const http = Fastify({ logger, return503OnClosing: true });
+export function createServer({
+  logger = false,
+  auth,
+}: { logger?: boolean | { level: string; stream?: Writable }; auth?: Authentication } = {}) {
+  const http = Fastify({
+    logger: logger
+      ? {
+          ...(typeof logger === 'object' ? logger : {}),
+          redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
+        }
+      : false,
+    logController: new LogController({ disableRequestLogging: true }),
+    trustProxy: auth?.policy.trustProxy ?? false,
+    return503OnClosing: true,
+  });
   const existingCloseListeners = new Set(http.server.listeners('close'));
-  const realtime = new Server(http.server, { serveClient: false });
+  const realtime = new Server(http.server, {
+    serveClient: false,
+    cors: {
+      origin: (value, callback) => callback(null, !!auth && allowedOrigin(auth.policy, value)),
+      credentials: true,
+      allowedHeaders: ['Content-Type'],
+    },
+    allowRequest: (request, callback) =>
+      callback(
+        null,
+        !!auth &&
+          allowedOrigin(auth.policy, request.headers.origin) &&
+          secureRequest(auth.policy, request),
+      ),
+  });
+  // Engine.IO middleware also covers subsequent polling/upgrade requests, where
+  // allowRequest alone only protects initial connection establishment.
+  realtime.engine.use(
+    (request: IncomingMessage, _response: ServerResponse, next: (error?: Error) => void) => {
+      if (
+        !auth ||
+        !allowedOrigin(auth.policy, request.headers.origin) ||
+        !secureRequest(auth.policy, request)
+      )
+        return next(new Error('ORIGIN_FORBIDDEN'));
+      next();
+    },
+  );
+  http.setErrorHandler((error, request, reply) => {
+    const code =
+      error && typeof error === 'object' && 'statusCode' in error ? error.statusCode : 500;
+    const status = typeof code === 'number' && code >= 400 && code < 500 ? code : 500;
+    if (status === 500) request.log.error({ code: 'HTTP_INTERNAL_FAILURE' }, 'HTTP request failed');
+    reply.code(status).send({
+      code:
+        status === 413
+          ? 'PAYLOAD_TOO_LARGE'
+          : status === 500
+            ? 'INTERNAL_ERROR'
+            : 'INVALID_REQUEST',
+    });
+  });
+  if (auth) installAuthentication(http, realtime, auth);
+  else realtime.use((_socket, next) => next(new Error('UNAUTHENTICATED')));
   // Engine.IO installs automatic HTTP-close cleanup. Move those exact callbacks
   // to preClose: upgraded sockets must close before HTTP drain, not again after it.
   const realtimeCloseListeners = http.server
@@ -17,6 +78,8 @@ export function createServer({ logger = false }: { logger?: boolean | { level: s
 
   // Upgraded sockets must close before Fastify drains its shared HTTP server.
   http.addHook('preClose', async () => {
+    auth?.login.close();
+    await auth?.sessions.close();
     for (const listener of realtimeCloseListeners) listener.call(http.server);
   });
   http.addHook('onClose', async () => {

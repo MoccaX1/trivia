@@ -25,7 +25,8 @@
     "@node-rs/argon2": "2.2.2",
     "fastify": "^5.12.5",
     "pg": "^8.23.1",
-    "socket.io": "^4.8.4"
+    "socket.io": "^4.8.4",
+    "tldts": "7.4.19"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -2,6 +2,11 @@ import { pathToFileURL } from 'node:url';
 import { readConfig } from './config.js';
 import { connectPostgres } from './persistence/postgres.js';
 import { createServer } from './transport/server.js';
+import { PlayerRepository } from './persistence/players.js';
+import { LoginService } from './application/login.js';
+import { MemorySessionStore } from './application/sessions.js';
+import { SystemClock, NodeMatchScheduler } from './runtime/match-time.js';
+import { readAuthPolicy } from './transport/auth-policy.js';
 
 // Log stable failure codes only: driver messages/stacks can contain credentials.
 function failureCode(error: unknown) {
@@ -11,9 +16,32 @@ function failureCode(error: unknown) {
 
 export async function runBackend(
   config: ReturnType<typeof readConfig>,
-  server = createServer({ logger: { level: config.logLevel } }),
+  server: ReturnType<typeof createServer> | undefined = undefined,
   database = connectPostgres(config.database),
 ) {
+  if (!server) {
+    try {
+      const policy = readAuthPolicy();
+      const clock = new SystemClock();
+      server = createServer({
+        logger: { level: config.logLevel },
+        auth: {
+          policy,
+          sessions: new MemorySessionStore(clock, new NodeMatchScheduler(clock), () =>
+            server?.log.error(
+              { code: 'SESSION_TIMER_FAILURE' },
+              'Session invalidated after infrastructure failure',
+            ),
+          ),
+          login: new LoginService(new PlayerRepository(database), () => clock.now()),
+        },
+      });
+    } catch (error) {
+      await database.end();
+      throw error;
+    }
+  }
+  const backend = server;
   let shutdownRequested = false;
   let resolveShutdown: () => void;
   const requested = new Promise<void>((resolve) => {
@@ -30,12 +58,12 @@ export async function runBackend(
   function stop(signal: NodeJS.Signals) {
     if (shutdownRequested) return;
     shutdownRequested = true;
-    server.log.info({ signal }, 'Backend shutdown requested');
+    backend.log.info({ signal }, 'Backend shutdown requested');
     boundShutdown();
     resolveShutdown();
   }
   function databaseError(error: unknown) {
-    server.log.error({ code: failureCode(error) }, 'Unexpected idle PostgreSQL connection error');
+    backend.log.error({ code: failureCode(error) }, 'Unexpected idle PostgreSQL connection error');
   }
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
@@ -43,11 +71,11 @@ export async function runBackend(
 
   try {
     await database.query('SELECT 1');
-    if (!shutdownRequested) await server.listen({ host: config.host, port: config.port });
+    if (!shutdownRequested) await backend.listen({ host: config.host, port: config.port });
     if (!shutdownRequested) await requested;
   } catch (error) {
     process.exitCode = 1;
-    server.log.error({ code: failureCode(error) }, 'Backend startup failed');
+    backend.log.error({ code: failureCode(error) }, 'Backend startup failed');
   } finally {
     // One owner/path for cleanup, including signals concurrent with a failure.
     // Keep handlers installed until cleanup finishes so repeated signals are safe.
@@ -56,11 +84,11 @@ export async function runBackend(
     let cleanupFailed = false;
     let databaseClosed = false;
     try {
-      await server.close();
+      await backend.close();
     } catch (error) {
       cleanupFailed = true;
       process.exitCode = 1;
-      server.log.error({ code: failureCode(error) }, 'HTTP/realtime cleanup failed');
+      backend.log.error({ code: failureCode(error) }, 'HTTP/realtime cleanup failed');
     }
     try {
       await database.end();
@@ -68,7 +96,7 @@ export async function runBackend(
     } catch (error) {
       cleanupFailed = true;
       process.exitCode = 1;
-      server.log.error({ code: failureCode(error) }, 'PostgreSQL cleanup failed');
+      backend.log.error({ code: failureCode(error) }, 'PostgreSQL cleanup failed');
     } finally {
       // A failed close may leave live resources. Keep the bound in that case,
       // but do not let the timer itself delay an otherwise natural failure exit.
@@ -78,7 +106,7 @@ export async function runBackend(
       process.off('SIGTERM', stop);
       if (databaseClosed) database.off('error', databaseError);
     }
-    server.log.info('Backend shutdown complete');
+    backend.log.info('Backend shutdown complete');
   }
 }
 

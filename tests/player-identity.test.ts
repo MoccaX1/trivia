@@ -44,7 +44,12 @@ test(
     );
 
     const applied = await applyMigrations(pool);
-    assert.ok(applied.length === 0 || applied.includes('001_player_identity.sql'));
+    assert.ok(
+      applied.length === 0 ||
+        applied.every((name) =>
+          ['001_player_identity.sql', '002_canonical_username.sql'].includes(name),
+        ),
+    );
     assert.deepEqual(await applyMigrations(pool), []);
 
     const repository = new PlayerRepository(pool);

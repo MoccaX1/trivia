@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { canonicalUsername, validateDisplayName } from '../application/player-identity.js';
 import type pg from 'pg';
 import type { PlayerProfile } from '../application/authenticate-player.js';
 
@@ -34,6 +35,7 @@ export class PlayerRepository {
   constructor(private readonly pool: pg.Pool) {}
 
   async findCredentialByUsername(username: string): Promise<CredentialForVerification | null> {
+    username = canonicalUsername(username);
     try {
       const result = await this.pool.query<{
         id: string;
@@ -77,6 +79,8 @@ export class PlayerRepository {
     displayName: string,
     passwordHash: string,
   ): Promise<PlayerProfile> {
+    username = canonicalUsername(username);
+    validateDisplayName(displayName);
     const player = Object.freeze({ id: randomUUID(), displayName });
     let client: pg.PoolClient;
     try {

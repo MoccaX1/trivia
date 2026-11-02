@@ -5,8 +5,8 @@ Node.js HTTP server; PostgreSQL supplies local durable storage infrastructure.
 The pure Match Engine and application runtime support the complete ten-question
 lifecycle, serialized commands and authoritative timers. They are not connected
 to transport gameplay handlers yet. Player/Credential persistence and password
-verification exist, but HTTP/socket authentication, History API and frontend remain
-unimplemented.
+verification and trusted HTTP/Socket.IO sessions exist. History API and frontend
+remain unimplemented.
 
 ## Design authority
 
@@ -98,8 +98,8 @@ docker compose --profile tools run --build --rm tools npm run migrate
 
 For native development, `npm run migrate` uses `DATABASE_URL` from `.env` and
 builds first. Repeating the command is safe: applied SQL is tracked with a checksum;
-changed or unknown migration versions fail instead of being replayed. The migration
-creates `player` and `password_credential` only. Player IDs are server-generated UUIDs.
+changed or unknown migration versions fail instead of being replayed. The migrations
+create `player` and `password_credential` and enforce canonical usernames. Player IDs are server-generated UUIDs.
 No public registration or provisioning command is available.
 
 PostgreSQL integration tests require a separate database whose name ends in `_test`.
@@ -229,3 +229,66 @@ pool without an ORM; `socket.io-client` is development-only for connection check
 ESLint handles code checks and Prettier formatting. `docs/` is excluded from automatic
 formatting to preserve existing designs. Commit `package-lock.json`; keep `.env`,
 `node_modules/`, `dist/`, caches, and local agent/cloud configuration out of Git.
+
+## Authentication and sessions (Phase 4 Slice 2)
+
+Apply migrations explicitly with `npm run migrate`; `002_canonical_username.sql`
+checks legacy username collisions/invalid characters before changing anything. A
+failure preserves accounts and migration ledger. Resolve conflicts manually through
+an approved data-remediation plan; never merge accounts automatically. Usernames
+are ASCII `[A-Za-z0-9_.-]`, 1–128 bytes, canonically lowercase and case-insensitive.
+Display names retain Unicode/spaces/emoji, use 1–64 extended graphemes, and reject
+blank or unsafe control content. Existing display rows are preserved without adding
+an ICU-dependent database constraint. No registration/provisioning HTTP route exists.
+
+`POST /auth/login` takes exactly `{ username, password }` as JSON (4 KiB body;
+password 1–1024 UTF-8 bytes without normalization). It sets a cookie and returns
+`{ player: { id, displayName } }`. Wrong/unknown credentials both return
+`401 INVALID_CREDENTIALS`; malformed input returns 400/413/415. Database failures
+and verification saturation return 503; throttling returns `429 RATE_LIMITED`.
+`GET /auth/profile` returns the public profile or 401 and never refreshes idle.
+`POST /auth/logout` accepts JSON `{}`, requires a session, revokes only that session,
+clears the cookie and closes its sockets; success is 204, missing session is 401.
+Auth responses are not cached and credentials are not returned in JSON/logs.
+
+Configure `AUTH_COOKIE_MODE`, `AUTH_PUBLIC_ORIGIN`, and comma-separated exact
+`AUTH_ORIGINS`. Secure mode requires HTTPS and permits only schemeful same-site
+origins (private public-suffix boundaries included). It uses
+`__Host-trivia_session; Path=/; HttpOnly; Secure; SameSite=Lax`, without Domain.
+Credentialed CORS and preflight support configured origins; missing/null or other
+origins are rejected. The same Origin rule protects polling and WebSocket handshakes.
+Only safe read-only `GET /auth/profile` permits missing Origin without Referer; a present Origin must be allowed, and null/disallowed origins reject. Session authentication and no-store remain mandatory, with no idle refresh. Login/logout and every Socket.IO handshake still require Origin. No frontend domain/port or deployment topology is assumed. HTTPS terminated at a
+proxy requires `AUTH_TRUST_PROXY` with only its explicit IP/CIDR addresses; forwarded
+IP/TLS headers from other peers are ignored. Forwarded TLS must be exactly `https`.
+
+Native non-production loopback development may explicitly use `loopback` cookie
+mode with local HTTP origins and `trivia_session` without Secure. Actual socket
+peers must be loopback; a Docker bridge peer is not accepted merely because its
+Origin says localhost. Compose's production image requires secure configuration;
+use an HTTPS deployment/proxy for browser auth. Health remains public HTTP liveness.
+Missing production security configuration fails startup. Never set blanket proxy trust.
+
+Sessions contain only server-side public Player identity, keyed by SHA-256 digest
+of 256-bit random tokens. They expire after 30 minutes idle or 12 hours absolute;
+independent logins coexist and process restart requires login again. One timer per
+session removes expired records and closes associated sockets. Profile lookups,
+heartbeats and passive presence do not extend idle. Future Gateway code must call
+`SessionStore.act(token, player => coordinator.dispatch(...))`: final authorization,
+intentional activity and synchronous admission belong in that callback without an
+intervening await. Later logout never cancels already admitted work. This slice
+implements no gameplay handlers, Match rejoin, recovery or disconnect membership policy.
+
+Login protection allows 60 attempts/IP and 10 credential failures/canonical username
+per sliding 15 minutes, and at most four lookup/Argon2 verification operations in
+flight. No queue is created. Success/outages do not erase failure history; stale
+limiter entries expire, keys are capped at 10,000 per map and saturation fails 503.
+`tldts` supplies maintained public-suffix parsing for same-site checks; it is the
+only new dependency. Password hashing retains the Slice 1 Argon2id parameters.
+
+Run `npm run check`, or the existing Docker tools workflow, with a separate
+`TEST_DATABASE_URL` ending in `_test` for real migration/identity tests. Migration
+fixtures use fresh isolated schemas, including collision rollback and concurrent runs.
+`npm run smoke` verifies health and rejection of unauthenticated sockets. To also
+verify authenticated connections, provide `SMOKE_ORIGIN`, `SMOKE_USERNAME` and
+`SMOKE_PASSWORD` for an internally provisioned test account via an untracked local
+environment; keep those values out of command output and shell history.
