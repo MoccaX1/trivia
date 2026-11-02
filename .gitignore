@@ -10,3 +10,6 @@ coverage/
 .agents/
 .codex/
 .aws/
+# Codebase Memory MCP generated artifacts
+.codebase-memory/graph.db.zst
+.codebase-memory/artifact.json
