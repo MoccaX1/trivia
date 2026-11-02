@@ -8,6 +8,14 @@ import { MemorySessionStore, idleMs } from '../src/application/sessions.js';
 import { fixturePlayer, testAuth } from './support/auth.js';
 
 const origin = 'http://localhost';
+function authPaths(endpoint: string): string[] {
+  return [
+    `/auth/${endpoint}`,
+    `/%61uth/${endpoint}`,
+    `/auth/%${endpoint.charCodeAt(0).toString(16)}${endpoint.slice(1)}`,
+    `/%61%75th/${endpoint}?source=regression`,
+  ];
+}
 function setup(t: { after(callback: () => Promise<void>): void }) {
   let now = 0,
     checks = 0,
@@ -431,28 +439,30 @@ test('authentication logs and errors do not disclose credentials, cookies, hashe
   assert.doesNotMatch(logs, /SECRET_/);
 });
 
-test('safe profile permits absent Origin/Referer; validates present Origin without refreshing or disclosing secrets', async (t) => {
+test('normal and encoded profile routes enforce safe-GET Origin, authentication, no-store and non-refresh semantics', async (t) => {
   const f = setup(t);
   const login = await f.login();
   const cookie = login.headers['set-cookie'] as string;
   f.advance(idleMs - 1);
-  for (const headers of [{ cookie }, { cookie, origin }]) {
-    const response = await f.server.inject({ url: '/auth/profile', headers });
-    assert.equal(response.statusCode, 200);
-    assert.deepEqual(response.json(), { player: fixturePlayer });
-    assert.equal(response.headers['cache-control'], 'no-store');
-    assert.equal(response.headers['set-cookie'], undefined);
-    assert.doesNotMatch(response.body, /password|hash|token|session/i);
+  for (const url of authPaths('profile')) {
+    for (const headers of [{ cookie }, { cookie, origin }]) {
+      const response = await f.server.inject({ url, headers });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(response.json(), { player: fixturePlayer });
+      assert.equal(response.headers['cache-control'], 'no-store');
+      assert.equal(response.headers['set-cookie'], undefined);
+      assert.doesNotMatch(response.body, /password|hash|token|session/i);
+    }
+    for (const bad of ['http://evil.test', 'null']) {
+      const response = await f.server.inject({
+        url,
+        headers: { cookie, origin: bad },
+      });
+      assert.equal(response.statusCode, 403);
+      assert.equal(response.headers['cache-control'], 'no-store');
+    }
+    assert.equal((await f.server.inject({ url })).statusCode, 401);
   }
-  for (const bad of ['http://evil.test', 'null']) {
-    const response = await f.server.inject({
-      url: '/auth/profile',
-      headers: { cookie, origin: bad },
-    });
-    assert.equal(response.statusCode, 403);
-    assert.equal(response.headers['cache-control'], 'no-store');
-  }
-  assert.equal((await f.server.inject({ url: '/auth/profile' })).statusCode, 401);
   for (const url of ['/auth/login', '/auth/logout']) {
     assert.equal(
       (
@@ -467,8 +477,203 @@ test('safe profile permits absent Origin/Referer; validates present Origin witho
     );
   }
   f.advance(idleMs);
-  assert.equal(
-    (await f.server.inject({ url: '/auth/profile', headers: { cookie } })).statusCode,
-    401,
-  );
+  for (const url of authPaths('profile'))
+    assert.equal((await f.server.inject({ url, headers: { cookie } })).statusCode, 401);
+});
+
+for (const endpoint of ['login', 'logout']) {
+  test(`normal and encoded ${endpoint} routes require approved Origin before any action`, async (t) => {
+    const f = setup(t);
+    for (const url of authPaths(endpoint)) {
+      const token = await f.auth.sessions.create(fixturePlayer);
+      const cookie = `trivia_session=${token}`;
+      for (const suppliedOrigin of [undefined, 'http://evil.test', 'null', origin]) {
+        const response = await f.server.inject({
+          method: 'POST',
+          url,
+          headers: {
+            'content-type': 'application/json',
+            cookie,
+            ...(suppliedOrigin === undefined ? {} : { origin: suppliedOrigin }),
+          },
+          payload: endpoint === 'login' ? { username: 'alice', password: 'páss 👩‍💻' } : {},
+        });
+        const allowed = suppliedOrigin === origin;
+        assert.equal(response.statusCode, allowed ? (endpoint === 'login' ? 200 : 204) : 403, url);
+        assert.equal(response.headers['cache-control'], 'no-store', url);
+        assert.equal(
+          (await f.auth.sessions.resolve(token)) !== null,
+          endpoint !== 'logout' || !allowed,
+        );
+      }
+      if (endpoint === 'logout') {
+        assert.equal(
+          (await f.server.inject({ method: 'POST', url, headers: f.headers, payload: {} }))
+            .statusCode,
+          401,
+        );
+      }
+    }
+    assert.equal(f.checks(), endpoint === 'login' ? authPaths(endpoint).length : 0);
+  });
+}
+
+test('normal and encoded login routes share one IP window, including malformed attempts', async (t) => {
+  const f = setup(t);
+  const paths = authPaths('login');
+  for (let n = 0; n < 60; n++) {
+    const response = await f.server.inject({
+      method: 'POST',
+      url: paths[n % paths.length]!,
+      headers: { ...f.headers, 'x-forwarded-for': `10.0.0.${n}` },
+      payload: n % 2 ? { username: 'alice', password: 'páss 👩‍💻' } : {},
+    });
+    assert.equal(response.statusCode, n % 2 ? 200 : 400);
+  }
+  for (const url of paths) {
+    const response = await f.server.inject({
+      method: 'POST',
+      url,
+      headers: f.headers,
+      payload: { username: 'alice', password: 'páss 👩‍💻' },
+    });
+    assert.equal(response.statusCode, 429, url);
+    assert.deepEqual(response.json(), { code: 'RATE_LIMITED' });
+  }
+  assert.equal(f.checks(), 30);
+  f.advance(900_000);
+  assert.equal((await f.login()).statusCode, 200);
+});
+
+test('normal and encoded auth routes enforce transport security before parsing or verification', async (t) => {
+  for (const mode of ['loopback', 'secure']) {
+    const auth = testAuth();
+    if (mode === 'secure')
+      auth.policy = readAuthPolicy({
+        AUTH_COOKIE_MODE: 'secure',
+        AUTH_PUBLIC_ORIGIN: 'https://api.example.com',
+        AUTH_ORIGINS: 'https://app.example.com',
+      });
+    const server = createServer({ auth });
+    t.after(() => server.close());
+    const token = await auth.sessions.create(fixturePlayer);
+    for (const endpoint of ['login', 'logout', 'profile'])
+      for (const url of authPaths(endpoint)) {
+        const response = await server.inject({
+          method: endpoint === 'profile' ? 'GET' : 'POST',
+          url,
+          remoteAddress: '203.0.113.5',
+          headers: {
+            origin: auth.policy.origins[0]!,
+            cookie: `${mode === 'secure' ? '__Host-trivia_session' : 'trivia_session'}=${token}`,
+            'x-forwarded-for': '127.0.0.1',
+            'x-forwarded-proto': 'https',
+            ...(endpoint === 'profile' ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(endpoint === 'profile' ? {} : { payload: '{invalid JSON' }),
+        });
+        assert.equal(response.statusCode, 403, `${mode} ${url}`);
+        assert.equal(response.headers['cache-control'], 'no-store');
+      }
+    assert.ok(await auth.sessions.resolve(token));
+  }
+});
+
+test('normal and encoded auth routes retain JSON/body limits and protected preflight', async (t) => {
+  const f = setup(t);
+  const token = await f.auth.sessions.create(fixturePlayer);
+  const cookie = `trivia_session=${token}`;
+  for (const endpoint of ['login', 'logout'])
+    for (const url of authPaths(endpoint)) {
+      assert.equal(
+        (
+          await f.server.inject({
+            method: 'POST',
+            url,
+            headers: { origin, cookie, 'content-type': 'text/plain' },
+            payload: 'not JSON',
+          })
+        ).statusCode,
+        415,
+        url,
+      );
+      for (const suppliedOrigin of [undefined, 'http://evil.test', 'null', origin]) {
+        const response = await f.server.inject({
+          method: 'OPTIONS',
+          url,
+          headers: {
+            'access-control-request-method': 'POST',
+            'access-control-request-headers': 'content-type',
+            ...(suppliedOrigin === undefined ? {} : { origin: suppliedOrigin }),
+          },
+        });
+        assert.equal(response.statusCode, suppliedOrigin === origin ? 204 : 403, url);
+        assert.equal(response.headers['cache-control'], 'no-store');
+        if (suppliedOrigin === origin) {
+          assert.equal(response.headers['access-control-allow-origin'], origin);
+          assert.equal(response.headers['access-control-allow-credentials'], 'true');
+        }
+      }
+      if (endpoint === 'login') {
+        const response = await f.server.inject({
+          method: 'POST',
+          url,
+          headers: f.headers,
+          payload: JSON.stringify({ username: 'alice', password: 'p' }) + ' '.repeat(4096),
+        });
+        assert.equal(response.statusCode, 413, url);
+        assert.equal(response.headers['cache-control'], 'no-store');
+      }
+    }
+  assert.equal(f.checks(), 0);
+  assert.ok(await f.auth.sessions.resolve(token));
+});
+
+test('real HTTP listener protects encoded auth routes and preserves login/profile/logout', async (t) => {
+  const f = setup(t);
+  const address = await f.server.listen({ host: '127.0.0.1', port: 0 });
+  for (let variant = 0; variant < authPaths('login').length; variant++) {
+    const loginUrl = address + authPaths('login')[variant];
+    const request = {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 'páss 👩‍💻' }),
+    };
+    assert.equal((await fetch(loginUrl, request)).status, 403);
+    const login = await fetch(loginUrl, { ...request, headers: { ...request.headers, origin } });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+    const profileUrl = address + authPaths('profile')[variant];
+    const profile = await fetch(profileUrl, { headers: { cookie } });
+    assert.equal(profile.status, 200);
+    assert.deepEqual(await profile.json(), { player: fixturePlayer });
+    assert.equal(profile.headers.get('cache-control'), 'no-store');
+    const logoutUrl = address + authPaths('logout')[variant];
+    assert.equal(
+      (
+        await fetch(logoutUrl, {
+          method: 'POST',
+          headers: { origin: 'http://evil.test', cookie },
+          body: '{}',
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (
+        await fetch(logoutUrl, {
+          method: 'POST',
+          headers: { origin, cookie, 'content-type': 'text/plain' },
+          body: '{}',
+        })
+      ).status,
+      415,
+    );
+    assert.equal(
+      (await fetch(logoutUrl, { method: 'POST', headers: { ...f.headers, cookie }, body: '{}' }))
+        .status,
+      204,
+    );
+    assert.equal((await fetch(profileUrl, { headers: { cookie } })).status, 401);
+  }
 });

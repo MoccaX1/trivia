@@ -20,7 +20,7 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 
 | Category | OPEN | ACCEPTED | RESOLVED | Total |
 |---|---:|---:|---:|---:|
-| BUG | 0 | 0 | 3 | 3 |
+| BUG | 0 | 0 | 4 | 4 |
 | LIM | 0 | 3 | 0 | 3 |
 | RISK | 2 | 0 | 2 | 4 |
 | DEBT | 2 | 0 | 0 | 2 |
@@ -29,11 +29,11 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 | OPS | 3 | 0 | 0 | 3 |
 | DEF | 2 | 2 | 1 | 5 |
 
-Total: **38** records; **5 ACCEPTED**, **22 OPEN**, **11 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **39** records; **5 ACCEPTED**, **22 OPEN**, **12 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
-Includes accepted limitations/exclusions; resolved decisions/mitigations retain their detailed records in §6 and historical defects are in §9. Priority is UNDECIDED for every record.
+Includes accepted limitations/exclusions; resolved decisions/mitigations retain their detailed records in §6 and historical defects are in §9. Active priorities are UNDECIDED; resolved BUG-004 retains its explicitly approved P0 remediation priority.
 
 | ID | Concern | Status | Severity | Proposed target |
 |---|---|---|---|---|
@@ -599,6 +599,20 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 - **Impact:** Unsafe versions would violate mutation/version ordering at the numeric boundary.
 - **Next action:** Keep guard and mutation-only increment tests; no active defect established.
 - **Related:** —.
+
+<a id="bug-004"></a>
+
+### BUG-004 — S2-01: Encoded authentication routes bypassed HTTP security
+
+- **Category / status:** BUG / RESOLVED. **Severity / priority:** HIGH / P0 (approved focused remediation).
+- **Component / phase:** HTTP authentication; Phase 4 Slice 2. **Target:** current demo, before public deployment.
+- **Evidence:** [route enforcement](../src/transport/authentication.ts); [encoded-path regressions](../tests/authentication.test.ts); approved [LLD §5.7 contract](low-level-design.md#57-http-api).
+- **Concern:** Fastify routed `/%61uth/login`, logout and profile aliases to authentication handlers, while a raw `/auth/` prefix check skipped transport/Origin/JSON enforcement, login IP accounting and no-store headers. Endpoint encodings also bypassed raw-path-specific decisions. Credential verification and session requirements were not bypassed.
+- **Remediation:** Attach the shared `onRequest` hook directly to login, logout, profile and preflight routes. Fastify routing precedes this hook; registered `routeOptions.url` supplies identity for login accounting and the safe read-only profile exception. No custom URL decoding, session-policy change or Socket.IO change.
+- **Verification:** Seven targeted tests failed against the vulnerable implementation and passed after remediation. Coverage includes normal paths, encoded prefixes/endpoints, mixed encodings with query strings, Origin cases, shared 60-attempt IP window, transport rejection before parsing, JSON/body bounds, preflight, no-store and profile non-refresh behavior, plus a real HTTP listener. Full suite: **147 passed, 0 failed, 0 skipped**, including disposable PostgreSQL migration/identity tests and existing Socket.IO/session tests. Typecheck, temporary-output build and scoped source/test/script lint/format checks passed. Existing authenticated smoke passed HTTP health and both Socket.IO transports; real backend SIGTERM shutdown exited 0.
+- **Remaining scope:** Full-checkout lint still reports five pre-existing manual-script errors and formatting flags six manual scripts. Dependency advisories remain open. Browser/TLS deployment and future Gateway admission are separate verification/integration work.
+- **Next action:** Preserve route-level protection and encoded-path regressions on future authentication routes. No remaining S2-01 bypass was found in the reviewed routes.
+- **Related:** RISK-002, RISK-004, TEST-005, DEF-002.
 
 ## 10. Historical coverage and evidence limitations
 
