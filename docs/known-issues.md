@@ -117,7 +117,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 - **Category / status:** OPS / OPEN. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Composition/observability; Phase 4. **Target:** before public deployment.
 - **Evidence:** [LLD §8.7](low-level-design.md#87-logging-rules); [takeTimerFailures](../src/application/match-coordinator.ts); [main](../src/main.ts).
-- **Concern:** Failures are drainable in memory; main does not compose the Coordinator or consume diagnostics.
+- **Concern:** Failures are drainable in memory. Slice 3 composes the shared Coordinator for WAITING operations, but does not yet consume Match timer diagnostics; Start/timer-driven gameplay transport remains deferred.
 - **Policy / status:** Error-level runtime reporting is explicitly a Phase 4 follow-up.
 - **Impact:** A stalled Match may lack an operator-visible error despite retained diagnostics.
 - **Next action:** Connect safe error reporting at runtime composition without adding recovery.
@@ -182,12 +182,12 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 ### RISK-003 — Private Engine outcomes must never be serialized directly
 
 - **Category / status:** RISK / OPEN. **Severity / priority:** HIGH / UNDECIDED.
-- **Component / phase:** Future Gateway/Presenter; Phase 4. **Target:** before public deployment.
+- **Component / phase:** Gateway/Presenter; Phase 4. **Target:** before public deployment.
 - **Evidence:** [LLD §§4.8,5.5](low-level-design.md#48-client-presenter--projection); [Engine](../src/domain/match-engine.ts); [boundary notes](../src/README.md).
-- **Concern:** Internal outcomes include answer keys, private submissions and bigint results; no Presenter exists.
+- **Concern:** Internal outcomes include answer keys, private submissions and bigint results. Slice 3 adds an explicit WAITING-only Presenter; active-phase and FINISHED projections remain absent.
 - **Policy / status:** Only phase-safe viewer projections may leave the backend.
-- **Impact:** Direct forwarding would leak answers/private data and mishandle bigint JSON. No gameplay transport currently exposes these objects.
-- **Next action:** Require projection tests and explicit DTO construction before Gateway integration.
+- **Impact:** Direct forwarding would leak answers/private data and mishandle bigint JSON. The lobby Gateway emits only allowlisted ACKs/snapshots; internal outcomes remain private.
+- **Next action:** Preserve Slice 3 disclosure tests and implement viewer-safe active/finished projections before exposing those commands. This broader record remains OPEN.
 - **Related:** DEF-002.
 
 <a id="risk-004"></a>
@@ -501,10 +501,11 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Category / status:** DEF / OPEN. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Gateway/Presenter/Provider; Phase 4. **Target:** current demo.
 - **Evidence:** [HLD §§3,10–11](HLD_Component_Diagram.md#3-realtime-gateway); [main](../src/main.ts); [boundary notes](../src/README.md).
-- **Concern:** Coordinator, clock and scheduler exist but main does not wire gameplay; no Presenter, Provider or gameplay transport handlers exist.
-- **Policy / status:** Required M1 integration follows approved identity/session contract.
-- **Impact:** A production listener cannot create/join/start/play a safe Match yet.
-- **Next action:** Deliver small vertical slices with trusted identity and safe snapshots; never serialize Engine outcomes.
+- **Concern:** Slice 3 now wires one shared Coordinator into main and implements authenticated Create/Join/non-Host Leave, per-socket subscriptions and a WAITING Presenter. Start/Answer transport, active-phase projections, Question Provider and timer-driven delivery remain absent.
+- **Policy / status:** Lobby admission runs synchronously inside SessionStore.act; snapshot delivery uses non-refreshing inspect. Replays retain historical ACKs without reapplying subscriptions. Trusted profile enrichment happens after commit, and failure preserves accepted outcomes with safe diagnostics. Full playable integration remains OPEN.
+- **Verification:** Slice 3 full suite: 163 passed, 0 failed, 0 skipped with disposable PostgreSQL; S2-01 regressions: 7 passed. A clean tools-image `npm run check`, Compose backend/PostgreSQL health checks, two-client authenticated lobby smoke and active-client SIGTERM shutdown passed. Full-checkout manual-script lint/format debt remains TEST-005.
+- **Impact:** The backend supports a multiplayer WAITING lobby, not a complete playable M1 Match.
+- **Next action:** Add approved question provisioning and active-phase Gateway/Presenter integration in later slices; preserve FIFO, session admission and private-state isolation.
 - **Related:** RISK-003, DEC-011, TEST-004.
 
 <a id="def-003"></a>

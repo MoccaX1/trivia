@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { readConfig } from './config.js';
 import { connectPostgres } from './persistence/postgres.js';
 import { createServer } from './transport/server.js';
@@ -7,6 +8,7 @@ import { LoginService } from './application/login.js';
 import { MemorySessionStore } from './application/sessions.js';
 import { SystemClock, NodeMatchScheduler } from './runtime/match-time.js';
 import { readAuthPolicy } from './transport/auth-policy.js';
+import { MatchCoordinator } from './application/match-coordinator.js';
 
 // Log stable failure codes only: driver messages/stacks can contain credentials.
 function failureCode(error: unknown) {
@@ -23,18 +25,21 @@ export async function runBackend(
     try {
       const policy = readAuthPolicy();
       const clock = new SystemClock();
+      const scheduler = new NodeMatchScheduler(clock);
+      const players = new PlayerRepository(database);
       server = createServer({
         logger: { level: config.logLevel },
         auth: {
           policy,
-          sessions: new MemorySessionStore(clock, new NodeMatchScheduler(clock), () =>
+          sessions: new MemorySessionStore(clock, scheduler, () =>
             server?.log.error(
               { code: 'SESSION_TIMER_FAILURE' },
               'Session invalidated after infrastructure failure',
             ),
           ),
-          login: new LoginService(new PlayerRepository(database), () => clock.now()),
+          login: new LoginService(players, () => clock.now()),
         },
+        lobby: { coordinator: new MatchCoordinator(clock, scheduler, randomUUID), players },
       });
     } catch (error) {
       await database.end();

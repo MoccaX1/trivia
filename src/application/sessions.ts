@@ -7,6 +7,8 @@ export const absoluteMs = 12 * 60 * 60_000;
 export interface SessionStore {
   create(player: PlayerProfile): Promise<string>;
   resolve(token: string): Promise<PlayerProfile | null>;
+  // Non-refreshing authorization and delivery share one synchronous boundary.
+  inspect<T>(token: string, action: (player: PlayerProfile) => T): Promise<{ value: T } | null>;
   revoke(token: string): Promise<void>;
   // The implementation invokes action immediately after its final authorization
   // check, without yielding. Future Gateway admission belongs inside this callback.
@@ -98,6 +100,13 @@ export class MemorySessionStore implements SessionStore {
   }
   async resolve(token: string): Promise<PlayerProfile | null> {
     return this.find(token)?.player ?? null;
+  }
+  async inspect<T>(
+    token: string,
+    action: (player: PlayerProfile) => T,
+  ): Promise<{ value: T } | null> {
+    const session = this.find(token);
+    return session ? { value: action(session.player) } : null;
   }
   async act<T>(token: string, action: (player: PlayerProfile) => T): Promise<{ value: T } | null> {
     const session = this.find(token);

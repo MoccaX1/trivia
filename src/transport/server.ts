@@ -5,11 +5,19 @@ import { Server } from 'socket.io';
 import { installAuthentication } from './authentication.js';
 import type { Authentication } from './authentication.js';
 import { allowedOrigin, secureRequest } from './auth-policy.js';
+import { installLobbyGateway } from './lobby-gateway.js';
+import type { LobbyRuntime } from './lobby-gateway.js';
 
 export function createServer({
   logger = false,
   auth,
-}: { logger?: boolean | { level: string; stream?: Writable }; auth?: Authentication } = {}) {
+  lobby,
+}: {
+  logger?: boolean | { level: string; stream?: Writable };
+  auth?: Authentication;
+  lobby?: LobbyRuntime;
+} = {}) {
+  if (lobby && !auth) throw new TypeError('Lobby requires authentication');
   const http = Fastify({
     logger: logger
       ? {
@@ -66,6 +74,12 @@ export function createServer({
   });
   if (auth) installAuthentication(http, realtime, auth);
   else realtime.use((_socket, next) => next(new Error('UNAUTHENTICATED')));
+  const closeLobby =
+    auth && lobby
+      ? installLobbyGateway(realtime, auth, lobby, (code, matchId) =>
+          http.log.error({ code, matchId }, 'Lobby operation unavailable'),
+        )
+      : undefined;
   // Engine.IO installs automatic HTTP-close cleanup. Move those exact callbacks
   // to preClose: upgraded sockets must close before HTTP drain, not again after it.
   const realtimeCloseListeners = http.server
@@ -78,9 +92,17 @@ export function createServer({
 
   // Upgraded sockets must close before Fastify drains its shared HTTP server.
   http.addHook('preClose', async () => {
-    auth?.login.close();
-    await auth?.sessions.close();
-    for (const listener of realtimeCloseListeners) listener.call(http.server);
+    closeLobby?.();
+    try {
+      await lobby?.coordinator.shutdown();
+    } finally {
+      auth?.login.close();
+      try {
+        await auth?.sessions.close();
+      } finally {
+        for (const listener of realtimeCloseListeners) listener.call(http.server);
+      }
+    }
   });
   http.addHook('onClose', async () => {
     // Fastify owns the HTTP listener. Socket.IO.close() would close it (and

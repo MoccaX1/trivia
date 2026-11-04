@@ -93,3 +93,20 @@ test('intentional activity slides idle but never exceeds absolute twelve hours',
   assert.equal(await store.act(token, () => assert.fail()), null);
   await store.close();
 });
+
+test('inspect authorizes and invokes delivery without yielding or refreshing idle', async () => {
+  const { store, set } = setup();
+  const token = await store.create(fixturePlayer);
+  set(idleMs - 1);
+  let delivered = false;
+  const inspection = store.inspect(token, (player) => {
+    assert.equal(player.id, fixturePlayer.id);
+    delivered = true;
+    return 'delivered';
+  });
+  assert.equal(delivered, true);
+  assert.deepEqual(await inspection, { value: 'delivered' });
+  set(idleMs);
+  assert.equal(await store.inspect(token, () => assert.fail()), null);
+  await store.close();
+});

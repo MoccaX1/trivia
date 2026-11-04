@@ -999,6 +999,29 @@ commands.
 
 It must not contain private question or answer data.
 
+Slice 3 binds `CreateMatch`, `JoinMatch`, and `LeaveMatch` to Socket.IO callback
+ACKs, with `{ commandId, payload }` requests. Create uses an empty payload and
+fixed M1 defaults; Join/Leave accept only `{ matchId }`. Identity/profile fields
+are not accepted. ACKs contain `commandId`, status, and Match identity/version
+where available: `accepted`, `rejected` with `error.code` for processed domain or
+missing-Match outcomes, or `error` for `INVALID_REQUEST`, `UNAUTHENTICATED`, and
+`LOBBY_UNAVAILABLE`. An uncorrelatable malformed request uses `commandId: null`.
+An ACK timeout means unknown outcome; retry with the same command ID.
+
+The `LobbySnapshot` event uses the envelope above and the WAITING field allowlist.
+Public rules are `questionCount`, `answerWindowMs`, `revealDurationMs`,
+`allowAnswerChanges`, `maxAttempts`, and `earlyClose`, with §4.6 defaults.
+Only the first successful Create/Join subscribes that socket. Leave invalidates
+subscriptions for the departed membership; disconnect removes that socket's
+subscriptions. Other sockets/sessions and reconnects are not subscribed implicitly.
+Cached receipts replay historical ACKs without applying subscription effects again.
+
+Resolve trusted display names after commit. Recheck current version, session,
+subscription and membership before delivery; discard/regenerate stale projections.
+Enrichment failure preserves the accepted ACK, logs a safe diagnostic, and emits
+no incomplete snapshot. A later valid event can request a fresh projection; no
+automatic recovery worker is implied.
+
 ---
 
 #### Question Open Snapshot
@@ -1272,7 +1295,9 @@ Conceptual access contracts:
   30-minute sliding idle and 12-hour absolute expiration. Digest keys avoid storing
   raw bearer tokens. Independent sessions coexist; restart loses sessions. Timely
   cleanup removes expired entries and session/socket associations. No JWT/refresh flow.
-- Resolve/watch never refresh activity. An intentional-action operation performs
+- Resolve/watch/inspect never refresh activity. `inspect` checks the session and
+  invokes its delivery callback synchronously, allowing a final non-refreshing
+  authorization check without an asynchronous gap. An intentional-action operation performs
   its final validity check and invokes the supplied admission callback without yielding.
   A future Gateway must synchronously admit through Coordinator inside that callback;
   Engine rejection may still count as activity. Revocation/expiry rejects new actions
