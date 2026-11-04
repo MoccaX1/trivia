@@ -44,7 +44,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 | [OPS-002](#ops-002) | Production HTTPS, secret and deployment procedures are unspecified | OPEN | HIGH | before public deployment |
 | [OPS-003](#ops-003) | Health is liveness, not operational readiness | OPEN | MEDIUM | before public deployment |
 | [RISK-003](#risk-003) | Private Engine outcomes must never be serialized directly | OPEN | HIGH | before public deployment |
-| [RISK-004](#risk-004) | Current dependency advisories remain unremediated | OPEN | HIGH | before public deployment |
+| [RISK-004](#risk-004) | Development dependency advisories remain unremediated | OPEN | MEDIUM | before public deployment |
 | [DEBT-001](#debt-001) | Repository guidance contains obsolete implementation descriptions | OPEN | LOW | later hardening |
 | [DEBT-002](#debt-002) | Competition ranking clarification is not fully in frozen baseline | OPEN | LOW | current demo |
 | [DEC-005](#dec-005) | Password creation policy remains undecided | OPEN | UNDETERMINED | undecided |
@@ -192,25 +192,26 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 <a id="risk-004"></a>
 
-### RISK-004 — Current dependency advisories remain unremediated
+### RISK-004 — Development dependency advisories remain unremediated
 
-- **Category / status:** RISK / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** RISK / OPEN. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Runtime and development dependencies; Slice 2 verification. **Target:** before public deployment.
-- **Evidence:** npm audit --json executed during Slice 2; [lockfile](../package-lock.json).
-- **Concern:** 15 dependency entries flagged: 1 low, 13 moderate, 1 high; includes propagated dependency findings, not 15 distinct incidents. Runtime image install reported 2 findings (low/moderate); the high finding is development/release dependency undici.
-- **Policy / status:** No unrelated upgrades applied. New direct dependency tldts 7.4.19 provides PSL-aware same-site checks and was not flagged in this audit.
-- **Impact:** Runtime/development exposure depends on advisory conditions; no exploitation is asserted.
-- **Next action:** Review and patch compatible dependencies in a focused change; revalidate pinned release tooling before any version change. npm suggestions include major/downgrade changes and must not be applied blindly.
+- **Evidence:** Fresh `npm audit --json`, `npm audit --omit=dev --json` and `npm ls release-it undici fastify fast-uri --all` after the focused production and release-tooling patches; [lockfile](../package-lock.json).
+- **Concern:** The initial Slice 2 audit flagged 15 entries (1 low, 13 moderate, 1 high); the production patch reduced this to 13 development entries. After the release-tooling patch, **11 Moderate development-only entries remain**, all from the minimatch/lint-tool dependency chain. No High findings remain, and the production audit still reports **zero vulnerabilities**.
+- **Policy / status:** The production patch updated Fastify 5.12.5 → 5.12.6, fast-uri 4.2.1 → 4.2.3 and nested Ajv fast-uri 3.1.8 → 3.1.9. The subsequent release-tooling patch pins release-it 21.1.2 and resolves undici 7.30.1 through normal npm resolution; its incremental lockfile changes only those two package records and the root release-it pin. Production records remain intact, without a direct fast-uri dependency or new overrides. ESLint, TypeScript-ESLint and minimatch remain unchanged; this record stays OPEN. tldts 7.4.19 was not flagged.
+- **Verification:** Full suite with disposable PostgreSQL: **147 passed, 0 failed, 0 skipped**; seven targeted S2-01 encoded-route tests passed. Release/changelog verification: **21 passed**, including nine release lifecycle tests, using disposable local Git repositories with networking disabled; no remote GitLab access or actual-repository releases. Typecheck/build and scoped lint/format checks passed. Authenticated smoke passed HTTP health, Socket.IO polling/WebSocket, real PostgreSQL encoded login/profile/logout and revocation; backend SIGTERM shutdown exited 0. No source or migration changes. The five manual-script lint errors and six formatting failures remain TEST-005.
+- **Impact:** Remaining risk concerns crafted glob patterns processed by development tooling, not HTTP or Socket.IO input. Severity is now MEDIUM after removing the High undici findings; no exploitation is asserted.
+- **Next action:** Review the remaining lint-tool advisory separately. A patched minimatch major is outside current parent ranges; do not force an override or apply npm's suggested toolchain downgrades without compatibility validation. Revalidate release tooling on future upgrades.
 - **Related:** TEST-003.
 
 | Package / installed version | Audit severity | Advisory references | Remediation status |
 |---|---|---|---|
-| fast-uri 4.2.1; nested ajv copy 3.1.8 | moderate | [GHSA-333x-w4r6-6crp](https://github.com/advisories/GHSA-333x-w4r6-6crp), [GHSA-w74x-v6f9-j3xg](https://github.com/advisories/GHSA-w74x-v6f9-j3xg), [GHSA-wjr9-j795-jxcr](https://github.com/advisories/GHSA-wjr9-j795-jxcr), [GHSA-xhq7-xmqj-769h](https://github.com/advisories/GHSA-xhq7-xmqj-769h) | Open; no remediation applied |
-| fastify 5.12.5 | low | [GHSA-389g-gv7q-r4x8](https://github.com/advisories/GHSA-389g-gv7q-r4x8) | Open; no remediation applied |
+| fast-uri 4.2.3; nested ajv copy 3.1.9 | moderate (historical) | [GHSA-333x-w4r6-6crp](https://github.com/advisories/GHSA-333x-w4r6-6crp), [GHSA-w74x-v6f9-j3xg](https://github.com/advisories/GHSA-w74x-v6f9-j3xg), [GHSA-wjr9-j795-jxcr](https://github.com/advisories/GHSA-wjr9-j795-jxcr), [GHSA-xhq7-xmqj-769h](https://github.com/advisories/GHSA-xhq7-xmqj-769h) | Resolved by patch; absent from production audit |
+| fastify 5.12.6 | low (historical) | [GHSA-389g-gv7q-r4x8](https://github.com/advisories/GHSA-389g-gv7q-r4x8) | Resolved by patch; absent from production audit |
 | minimatch 10.2.6 | moderate | [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249) | Open; no remediation applied |
-| undici 7.29.1 | high | [GHSA-2m5v-pch6-74hx](https://github.com/advisories/GHSA-2m5v-pch6-74hx), [GHSA-4qv8-2p9j-2685](https://github.com/advisories/GHSA-4qv8-2p9j-2685), [GHSA-4w7w-5xrc-9h26](https://github.com/advisories/GHSA-4w7w-5xrc-9h26), [GHSA-55wc-3pg8-jfw6](https://github.com/advisories/GHSA-55wc-3pg8-jfw6), [GHSA-9fm3-97px-rjf6](https://github.com/advisories/GHSA-9fm3-97px-rjf6), [GHSA-f72v-6w45-q472](https://github.com/advisories/GHSA-f72v-6w45-q472), [GHSA-qrxm-fqhp-jwvm](https://github.com/advisories/GHSA-qrxm-fqhp-jwvm), [GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c) | Open; no remediation applied |
+| undici 7.30.1 via release-it 21.1.2 | high (historical) | [GHSA-2m5v-pch6-74hx](https://github.com/advisories/GHSA-2m5v-pch6-74hx), [GHSA-4qv8-2p9j-2685](https://github.com/advisories/GHSA-4qv8-2p9j-2685), [GHSA-4w7w-5xrc-9h26](https://github.com/advisories/GHSA-4w7w-5xrc-9h26), [GHSA-55wc-3pg8-jfw6](https://github.com/advisories/GHSA-55wc-3pg8-jfw6), [GHSA-9fm3-97px-rjf6](https://github.com/advisories/GHSA-9fm3-97px-rjf6), [GHSA-f72v-6w45-q472](https://github.com/advisories/GHSA-f72v-6w45-q472), [GHSA-qrxm-fqhp-jwvm](https://github.com/advisories/GHSA-qrxm-fqhp-jwvm), [GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c) | Resolved by release-tooling patch; undici and release-it absent from full audit |
 
-Propagated moderate entries: `@eslint-community/eslint-utils` 4.10.1, `@eslint/config-array` 0.23.5, `@eslint/js` 10.0.1, `@typescript-eslint/eslint-plugin` 8.71.1, `@typescript-eslint/parser` 8.71.1, `@typescript-eslint/type-utils` 8.71.1, `@typescript-eslint/typescript-estree` 8.71.1, `@typescript-eslint/utils` 8.71.1, `eslint` 10.12.0, `release-it` 21.1.1, `typescript-eslint` 8.71.1. Each is attributed by npm to the dependency graph above rather than a separate direct advisory.
+Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, `@eslint/config-array` 0.23.5, `@eslint/js` 10.0.1, `@typescript-eslint/eslint-plugin` 8.71.1, `@typescript-eslint/parser` 8.71.1, `@typescript-eslint/type-utils` 8.71.1, `@typescript-eslint/typescript-estree` 8.71.1, `@typescript-eslint/utils` 8.71.1, `eslint` 10.12.0, `typescript-eslint` 8.71.1. Together with minimatch these are the 11 remaining entries, not 11 independent advisories.
 
 ### DEBT records
 
