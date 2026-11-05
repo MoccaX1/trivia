@@ -86,22 +86,43 @@ export function installLobbyGateway(
   const subscriptions = new Map<Socket, Map<string, Subscription>>();
   // Coordinator retries return the original Promise. A replay must never apply socket effects again.
   const observed = new WeakSet<Promise<CommandReceipt>>();
+  // Only the latest in-flight version per Match is retained, never retry promises.
+  const publishing = new Map<string, number>();
   let closed = false;
 
-  async function publish(matchId: string): Promise<void> {
-    try {
-      while (!closed) {
-        const found = coordinator.lookup(matchId);
-        if (found.status !== 'found' || found.match.phase !== 'WAITING') return;
-        const match = found.match;
-        if (![...subscriptions.values()].some((set) => set.has(matchId))) return;
+  function publish(matchId: string): void {
+    if (closed) return;
+    const found = coordinator.lookup(matchId);
+    if (found.status !== 'found' || found.match.phase !== 'WAITING') return;
+    const match = found.match;
+    if (publishing.get(matchId) === match.version) return;
+    let needed = false;
+    for (const [socket, set] of subscriptions) {
+      const subscription = set.get(matchId);
+      if (
+        socket.connected &&
+        subscription &&
+        subscription.version < match.version &&
+        match.participants.includes(subscription.playerId)
+      ) {
+        needed = true;
+        break;
+      }
+    }
+    if (!needed) return;
+    publishing.set(matchId, match.version);
+    void (async () => {
+      try {
         const profiles = await Promise.all(
           match.participants.map((id) => players.findPlayerById(id)),
         );
         if (closed) return;
         const current = coordinator.lookup(matchId);
         if (current.status !== 'found' || current.match.phase !== 'WAITING') return;
-        if (current.match !== match) continue; // A real newer commit, not a failed-enrichment retry.
+        if (current.match !== match) {
+          publish(matchId); // Regenerate only for a real newer commit.
+          return;
+        }
         if (profiles.some((profile) => profile === null)) throw new Error('Missing lobby profile');
         const snapshot = presentLobby(match, profiles as PlayerProfile[]);
         for (const [socket, set] of subscriptions) {
@@ -121,12 +142,14 @@ export function installLobbyGateway(
           });
         }
         const latest = coordinator.lookup(matchId);
-        if (latest.status === 'found' && latest.match !== match) continue;
-        return;
+        if (latest.status === 'found' && latest.match !== match) publish(matchId);
+      } catch {
+        reportFailure('LOBBY_PROFILE_FAILURE', matchId);
+      } finally {
+        // An obsolete completion must not clear a newer version's in-flight marker.
+        if (publishing.get(matchId) === match.version) publishing.delete(matchId);
       }
-    } catch {
-      reportFailure('LOBBY_PROFILE_FAILURE', matchId);
-    }
+    })();
   }
 
   io.on('connection', (socket) => {
@@ -175,7 +198,7 @@ export function installLobbyGateway(
                 }
               }
               reply(acknowledgement(value.commandId, receipt));
-              if (!closed && result.status !== 'missing') void publish(result.match.id);
+              if (!closed && result.status !== 'missing') publish(result.match.id);
             });
           })
           .then((admitted) => {
@@ -193,5 +216,6 @@ export function installLobbyGateway(
   return () => {
     closed = true;
     subscriptions.clear();
+    publishing.clear();
   };
 }

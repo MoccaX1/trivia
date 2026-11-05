@@ -22,14 +22,14 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 |---|---:|---:|---:|---:|
 | BUG | 0 | 0 | 4 | 4 |
 | LIM | 0 | 3 | 0 | 3 |
-| RISK | 2 | 0 | 2 | 4 |
+| RISK | 2 | 0 | 3 | 5 |
 | DEBT | 2 | 0 | 0 | 2 |
 | DEC | 9 | 0 | 4 | 13 |
 | TEST | 4 | 0 | 1 | 5 |
 | OPS | 3 | 0 | 0 | 3 |
 | DEF | 2 | 2 | 1 | 5 |
 
-Total: **39** records; **5 ACCEPTED**, **22 OPEN**, **12 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **40** records; **5 ACCEPTED**, **22 OPEN**, **13 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
@@ -212,6 +212,20 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 | undici 7.30.1 via release-it 21.1.2 | high (historical) | [GHSA-2m5v-pch6-74hx](https://github.com/advisories/GHSA-2m5v-pch6-74hx), [GHSA-4qv8-2p9j-2685](https://github.com/advisories/GHSA-4qv8-2p9j-2685), [GHSA-4w7w-5xrc-9h26](https://github.com/advisories/GHSA-4w7w-5xrc-9h26), [GHSA-55wc-3pg8-jfw6](https://github.com/advisories/GHSA-55wc-3pg8-jfw6), [GHSA-9fm3-97px-rjf6](https://github.com/advisories/GHSA-9fm3-97px-rjf6), [GHSA-f72v-6w45-q472](https://github.com/advisories/GHSA-f72v-6w45-q472), [GHSA-qrxm-fqhp-jwvm](https://github.com/advisories/GHSA-qrxm-fqhp-jwvm), [GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c) | Resolved by release-tooling patch; undici and release-it absent from full audit |
 
 Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, `@eslint/config-array` 0.23.5, `@eslint/js` 10.0.1, `@typescript-eslint/eslint-plugin` 8.71.1, `@typescript-eslint/parser` 8.71.1, `@typescript-eslint/type-utils` 8.71.1, `@typescript-eslint/typescript-estree` 8.71.1, `@typescript-eslint/utils` 8.71.1, `eslint` 10.12.0, `typescript-eslint` 8.71.1. Together with minimatch these are the 11 remaining entries, not 11 independent advisories.
+
+<a id="risk-005"></a>
+
+### RISK-005 — A3-01: Redundant WAITING lobby profile enrichment
+
+- **Category / status:** RISK / RESOLVED. **Severity / priority:** MEDIUM / P2 (independent audit recommendation).
+- **Component / phase:** Lobby Gateway publication; Phase 4 Slice 3. **Target:** before public deployment.
+- **Evidence:** [publication guards](../src/transport/lobby-gateway.ts); six A3-01 regressions in [lobby tests](../tests/lobby.test.ts).
+- **Concern:** Cached command ACKs triggered profile lookups before delivered-version checks. The independent audit observed 40 pending lookups from 20 cached Create retries in a two-player Match; no duplicate mutation or unauthorized delivery was demonstrated.
+- **Remediation:** Check connected subscriptions, current membership and delivered versions before enrichment. A local latest-version marker coalesces equivalent in-flight requests per Match; superseded work cannot clear a newer marker. Completion/failure removes the marker, permitting a later valid event to retry incomplete delivery. Final session/membership/version checks and historical ACKs remain unchanged; close clears bookkeeping and suppresses pending delivery.
+- **Verification:** Three regressions failed before remediation (80 versus 0, 82 versus 2 and 21 versus 1 lookups), then passed. Six focused regressions cover retries, coalescing, failed-enrichment recovery, superseded work, disconnect and closure. Full suite with disposable PostgreSQL: **169 passed, 0 failed, 0 skipped**; lobby suite: **21 passed, 0 failed, 0 skipped**; S2-01 security regressions: **7 passed, 0 failed, 0 skipped**. Typecheck/build and scoped lint/format passed.
+- **Remaining scope:** Already-started reads for superseded real mutations may finish; no SQL cancellation, general database-stall recovery, background retries or new shutdown dependency was introduced. Existing manual-script debt and dependency advisories remain open.
+- **Next action:** Preserve lookup-count, replay, authorization, ordering and shutdown regressions. No new publication infrastructure is required.
+- **Related:** LIM-003, RISK-003, TEST-005.
 
 ### DEBT records
 

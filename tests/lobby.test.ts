@@ -379,6 +379,194 @@ test(
   },
 );
 
+test('A3-01: published Create/Join retries do not repeat enrichment or snapshots', async (t) => {
+  const f = await fixture(t),
+    a = await f.connect('alice'),
+    b = await f.connect('bob');
+  const createId = randomUUID(),
+    joinId = randomUUID();
+  const created = await accepted(command(a, 'CreateMatch', {}, createId));
+  await snapshot(a, created.matchId, 1);
+  const joined = await accepted(command(b, 'JoinMatch', { matchId: created.matchId }, joinId));
+  await snapshot(a, created.matchId, 2);
+  await snapshot(b, created.matchId, 2);
+  let reads = 0;
+  f.lookup(async (id) => {
+    reads++;
+    return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+  });
+  const retries = await Promise.all(
+    Array.from({ length: 20 }, () => [
+      command(a, 'CreateMatch', {}, createId),
+      command(b, 'JoinMatch', { matchId: created.matchId }, joinId),
+    ]).flat(),
+  );
+  assert.deepEqual(retries, Array.from({ length: 20 }, () => [created, joined]).flat());
+  await barrier(a);
+  await barrier(b);
+  assert.equal(reads, 0);
+  assert.deepEqual(
+    a.snapshots.map((item) => item.version),
+    [1, 2],
+  );
+  assert.deepEqual(
+    b.snapshots.map((item) => item.version),
+    [2],
+  );
+});
+
+test('A3-01: concurrent requests share enrichment of the current version', async (t) => {
+  const f = await fixture(t),
+    a = await f.connect('alice'),
+    b = await f.connect('bob');
+  const createId = randomUUID(),
+    joinId = randomUUID();
+  const { matchId } = await accepted(command(a, 'CreateMatch', {}, createId));
+  await snapshot(a, matchId, 1);
+  const release = deferred();
+  t.after(release.resolve);
+  let reads = 0;
+  f.lookup(async (id) => {
+    reads++;
+    await release.promise;
+    return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+  });
+  const joined = await accepted(command(b, 'JoinMatch', { matchId }, joinId));
+  await Promise.all(
+    Array.from({ length: 20 }, () => [
+      command(a, 'CreateMatch', {}, createId),
+      command(b, 'JoinMatch', { matchId }, joinId),
+    ]).flat(),
+  );
+  assert.equal(reads, 2);
+  assert.equal(b.snapshots.length, 0);
+  release.resolve();
+  await snapshot(a, matchId, joined.version);
+  await snapshot(b, matchId, joined.version);
+  await accepted(command(b, 'LeaveMatch', { matchId }));
+  await snapshot(a, matchId, 3);
+  assert.equal(reads, 3);
+  assert.deepEqual(
+    a.snapshots.map((item) => item.version),
+    [1, 2, 3],
+  );
+  assert.deepEqual(
+    b.snapshots.map((item) => item.version),
+    [2],
+  );
+});
+
+test('A3-01: failed coalesced enrichment can be retried by a later cached command', async (t) => {
+  const f = await fixture(t),
+    a = await f.connect('alice');
+  const release = deferred();
+  t.after(release.resolve);
+  let reads = 0;
+  f.lookup(async () => {
+    reads++;
+    await release.promise;
+    throw new Error('PRIVATE_PROFILE_FAILURE');
+  });
+  const createId = randomUUID();
+  const created = await accepted(command(a, 'CreateMatch', {}, createId));
+  await Promise.all(Array.from({ length: 20 }, () => command(a, 'CreateMatch', {}, createId)));
+  assert.equal(reads, 1);
+  release.resolve();
+  await barrier(a);
+  assert.deepEqual(a.snapshots, []);
+  assert.match(f.logs(), /LOBBY_PROFILE_FAILURE/);
+  assert.doesNotMatch(f.logs(), /PRIVATE_PROFILE_FAILURE/);
+  f.lookup(async (id) => {
+    reads++;
+    return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+  });
+  assert.deepEqual(await command(a, 'CreateMatch', {}, createId), created);
+  await snapshot(a, created.matchId, 1);
+  await command(a, 'CreateMatch', {}, createId);
+  await barrier(a);
+  assert.equal(reads, 2);
+  assert.equal(a.snapshots.length, 1);
+});
+
+test('A3-01: obsolete completion cannot clear newer in-flight enrichment', async (t) => {
+  const f = await fixture(t),
+    a = await f.connect('alice'),
+    b = await f.connect('bob'),
+    c = await f.connect('carol');
+  const createId = randomUUID();
+  const { matchId } = await accepted(command(a, 'CreateMatch', {}, createId));
+  await snapshot(a, matchId, 1);
+  const oldRelease = deferred(),
+    newRelease = deferred(),
+    oldFinished = deferred();
+  t.after(() => {
+    oldRelease.resolve();
+    newRelease.resolve();
+  });
+  f.lookup(async (id) => {
+    await oldRelease.promise;
+    oldFinished.resolve();
+    return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+  });
+  await accepted(command(b, 'JoinMatch', { matchId }));
+  let reads = 0;
+  f.lookup(async (id) => {
+    reads++;
+    await newRelease.promise;
+    return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+  });
+  await accepted(command(c, 'JoinMatch', { matchId }));
+  oldRelease.resolve();
+  await oldFinished.promise;
+  await barrier(a);
+  await Promise.all(Array.from({ length: 20 }, () => command(a, 'CreateMatch', {}, createId)));
+  assert.equal(reads, 3);
+  newRelease.resolve();
+  await snapshot(a, matchId, 3);
+  await snapshot(b, matchId, 3);
+  await snapshot(c, matchId, 3);
+  assert.deepEqual(
+    a.snapshots.map((item) => item.version),
+    [1, 3],
+  );
+  assert.deepEqual(
+    b.snapshots.map((item) => item.version),
+    [3],
+  );
+});
+
+for (const action of ['disconnect', 'shutdown'] as const) {
+  test(`A3-01: ${action} during enrichment prevents subsequent delivery`, async (t) => {
+    const f = await fixture(t),
+      a = await f.connect('alice'),
+      b = await f.connect('bob');
+    const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+    await snapshot(a, matchId, 1);
+    const release = deferred();
+    t.after(release.resolve);
+    let reads = 0;
+    f.lookup(async (id) => {
+      reads++;
+      await release.promise;
+      return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+    });
+    await accepted(command(b, 'JoinMatch', { matchId }));
+    assert.equal(reads, 2);
+    if (action === 'shutdown') await f.server.close();
+    else b.socket.disconnect();
+    release.resolve();
+    if (action === 'disconnect') await snapshot(a, matchId, 2);
+    // Drain the released enrichment without relying on a wall-clock delay.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(b.snapshots, []);
+    assert.deepEqual(
+      a.snapshots.map((item) => item.version),
+      action === 'shutdown' ? [1] : [1, 2],
+    );
+    assert.equal(reads, 2);
+  });
+}
+
 test(
   'profile lookup failure preserves accepted outcome; a later valid event projects trusted names',
   { timeout: 8_000 },
