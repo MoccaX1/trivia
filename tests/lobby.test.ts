@@ -10,6 +10,8 @@ import { createServer } from '../src/transport/server.js';
 import type { LobbyAcknowledgement } from '../src/transport/lobby-gateway.js';
 import { presentLobby } from '../src/application/lobby-presenter.js';
 import type { LobbySnapshot } from '../src/application/lobby-presenter.js';
+import type { MatchSnapshot } from '../src/application/match-presenter.js';
+import { demoQuestions } from '../src/application/demo-questions.js';
 import { createMatch, startMatch } from '../src/domain/match-engine.js';
 import { MatchCoordinator } from '../src/application/match-coordinator.js';
 import { LoginService } from '../src/application/login.js';
@@ -38,6 +40,7 @@ type Client = {
   token: string;
   player: PlayerProfile;
   snapshots: LobbySnapshot[];
+  active: MatchSnapshot[];
 };
 function command(
   client: Client,
@@ -157,9 +160,11 @@ async function fixture(t: TestContext, repository?: PlayerRepository) {
       token: cookie.split('=')[1]!,
       player: login.json().player as PlayerProfile,
       snapshots: [] as LobbySnapshot[],
+      active: [] as MatchSnapshot[],
     };
     clients.push(client);
     socket.on('LobbySnapshot', (item) => client.snapshots.push(item));
+    socket.on('MatchSnapshot', (item) => client.active.push(item));
     const connected = new Promise<void>((resolve, reject) => {
       socket.once('connect', resolve);
       socket.once('connect_error', reject);
@@ -185,6 +190,202 @@ async function fixture(t: TestContext, repository?: PlayerRepository) {
     logs: () => logs,
   };
 }
+
+function activeSnapshot(client: Client, version: number): Promise<MatchSnapshot> {
+  const existing = client.active.find((item) => item.version === version);
+  if (existing) return Promise.resolve(existing);
+  return new Promise((resolve) => {
+    const listener = (item: MatchSnapshot) => {
+      if (item.version === version) {
+        client.socket.off('MatchSnapshot', listener);
+        resolve(item);
+      }
+    };
+    client.socket.on('MatchSnapshot', listener);
+  });
+}
+
+async function fireDeadline(f: Awaited<ReturnType<typeof fixture>>, matchId: string) {
+  const found = f.coordinator.lookup(matchId);
+  assert.ok(found.status === 'found');
+  const match = found.match;
+  assert.ok(match.phase === 'QUESTION_OPEN' || match.phase === 'REVEAL');
+  const deadline =
+    match.phase === 'QUESTION_OPEN' ? match.currentQuestion.deadlineAt : match.revealDeadlineAt;
+  const timer = [...f.tasks].find((task) => task.at === deadline);
+  assert.ok(timer);
+  f.setTime(deadline);
+  timer.callback();
+  await f.coordinator.whenIdle(matchId);
+  return timer;
+}
+
+async function playTen(
+  f: Awaited<ReturnType<typeof fixture>>,
+  a: Client,
+  b: Client,
+  matchId: string,
+) {
+  const startId = randomUUID();
+  const start = await accepted(command(a, 'StartMatch', { matchId }, startId));
+  let current = await activeSnapshot(a, start.version);
+  await activeSnapshot(b, start.version);
+  let stale: Awaited<ReturnType<typeof fireDeadline>> | undefined;
+  for (let index = 0; index < 10; index++) {
+    assert.ok(current.phase === 'QUESTION_OPEN');
+    assert.equal(current.state.questionNumber, index + 1);
+    assert.equal(current.state.question.questionId, demoQuestions()[index]!.id);
+    assert.doesNotMatch(
+      JSON.stringify(current),
+      /correctChoice|ownResult|privateQuestions|resolvedQuestions/,
+    );
+    assert.equal(current.state.ownSubmission, undefined);
+    if (index < 9) assert.ok(!JSON.stringify(current).includes(demoQuestions()[index + 1]!.text));
+    f.setTime(Date.parse(current.state.deadlineAt) - 9_999);
+    const payload = {
+      matchId,
+      questionId: current.state.question.questionId,
+      choiceId: demoQuestions()[index]!.correctChoiceId,
+    };
+    const answerId = randomUUID();
+    const first = await accepted(command(a, 'SubmitAnswer', payload, answerId));
+    const own = await activeSnapshot(a, first.version),
+      other = await activeSnapshot(b, first.version);
+    assert.ok(own.phase === 'QUESTION_OPEN' && other.phase === 'QUESTION_OPEN');
+    assert.equal(own.state.ownSubmission?.choiceId, payload.choiceId);
+    assert.equal(other.state.ownSubmission, undefined);
+    assert.deepEqual(await command(a, 'SubmitAnswer', payload, answerId), first);
+    const second = await accepted(command(b, 'SubmitAnswer', payload));
+    await activeSnapshot(a, second.version);
+    stale = await fireDeadline(f, matchId);
+    const reveal = await activeSnapshot(a, second.version + 1);
+    await activeSnapshot(b, reveal.version);
+    assert.ok(reveal.phase === 'REVEAL');
+    assert.equal(reveal.state.questionNumber, index + 1);
+    assert.equal(reveal.state.question.correctChoiceId, payload.choiceId);
+    assert.equal(reveal.state.ownResult.correct, true);
+    assert.equal(
+      reveal.state.participants[0]!.score.scoreUnits,
+      (BigInt(index + 1) * 59_997_000n).toString(),
+    );
+    assert.deepEqual(
+      reveal.state.participants.map((p) => p.rank),
+      [1, 1],
+    );
+    assert.doesNotMatch(
+      JSON.stringify(reveal),
+      /privateSubmissions|resolvedQuestions|password|token/,
+    );
+    await fireDeadline(f, matchId);
+    current = await activeSnapshot(a, reveal.version + 1);
+    await activeSnapshot(b, current.version);
+    stale.callback(); // Old callbacks cannot mutate the next question or terminal state.
+    await f.coordinator.whenIdle(matchId);
+  }
+  assert.ok(current.phase === 'FINISHED');
+  assert.deepEqual(
+    current.state.participants.map((p) => [p.score.scoreUnits, p.rank]),
+    [
+      ['599970000', 1],
+      ['599970000', 1],
+    ],
+  );
+  assert.deepEqual(Object.keys(current.state), ['participants']);
+  const complete = f.coordinator.lookup(matchId);
+  assert.ok(complete.status === 'found' && complete.match.phase === 'FINISHED');
+  assert.equal(complete.match.result.resolvedQuestions.length, 10);
+  assert.equal(
+    complete.match.result.participants[0]!.finalScoreUnits.toString(),
+    current.state.participants[0]!.score.scoreUnits,
+  );
+  assert.deepEqual(await command(a, 'StartMatch', { matchId }, startId), start);
+  const terminal = await command(a, 'SubmitAnswer', {
+    matchId,
+    questionId: 'old',
+    choiceId: 'old',
+  });
+  assert.ok(terminal.status === 'rejected' && terminal.error.code === 'MATCH_FINISHED');
+  for (const client of [a, b]) {
+    assert.equal(
+      client.active.filter((s) => s.phase === 'QUESTION_OPEN' && !s.state.ownSubmission).length >=
+        10,
+      true,
+    );
+    assert.equal(client.active.filter((s) => s.phase === 'REVEAL').length, 10);
+    assert.equal(client.active.filter((s) => s.phase === 'FINISHED').length, 1);
+    const versions = client.active.map((s) => s.version);
+    assert.deepEqual(
+      versions,
+      [...new Set(versions)].sort((x, y) => x - y),
+    );
+  }
+}
+
+for (const transport of ['polling', 'websocket']) {
+  test(
+    `${transport}: trusted Start/Answer and ten automatic per-question reveals finish safely`,
+    { timeout: 10_000 },
+    async (t) => {
+      const f = await fixture(t),
+        a = await f.connect('alice', transport),
+        b = await f.connect('bob', transport);
+      const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+      await accepted(command(b, 'JoinMatch', { matchId }));
+      await playTen(f, a, b, matchId);
+    },
+  );
+}
+
+test(
+  'active commands validate identity/content, Host eligibility, attempts and exclusive ingress deadline',
+  { timeout: 8_000 },
+  async (t) => {
+    const f = await fixture(t),
+      a = await f.connect('alice'),
+      b = await f.connect('bob');
+    const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+    const insufficient = await command(a, 'StartMatch', { matchId });
+    assert.ok(
+      insufficient.status === 'rejected' && insufficient.error.code === 'INSUFFICIENT_PARTICIPANTS',
+    );
+    await accepted(command(b, 'JoinMatch', { matchId }));
+    const unauthorized = await command(b, 'StartMatch', { matchId });
+    assert.ok(unauthorized.status === 'rejected' && unauthorized.error.code === 'NOT_HOST');
+    for (const [event, payload] of [
+      ['StartMatch', { matchId, questions: demoQuestions() }],
+      ['StartMatch', { matchId, playerId: a.player.id }],
+      ['SubmitAnswer', { matchId, questionId: 'x', choiceId: 'x', receivedAt: 0 }],
+    ] as const) {
+      const ack = await command(b, event, payload);
+      assert.ok(ack.status === 'error' && ack.error.code === 'INVALID_REQUEST');
+    }
+    const started = await accepted(command(a, 'StartMatch', { matchId }));
+    const initial = await activeSnapshot(a, started.version);
+    assert.ok(initial.phase === 'QUESTION_OPEN');
+    const q = initial.state.question;
+    const payload = { matchId, questionId: q.questionId, choiceId: q.choices[0]!.choiceId };
+    const first = await accepted(command(a, 'SubmitAnswer', payload));
+    assert.equal((await accepted(command(a, 'SubmitAnswer', payload))).version, first.version);
+    for (const choice of q.choices.slice(1, 3))
+      await accepted(command(a, 'SubmitAnswer', { ...payload, choiceId: choice.choiceId }));
+    const exhausted = await command(a, 'SubmitAnswer', {
+      ...payload,
+      choiceId: q.choices[3]!.choiceId,
+    });
+    assert.ok(exhausted.status === 'rejected' && exhausted.error.code === 'MAX_ATTEMPTS_EXCEEDED');
+    const repeatedStart = await command(a, 'StartMatch', { matchId });
+    assert.ok(
+      repeatedStart.status === 'rejected' && repeatedStart.error.code === 'INVALID_MATCH_PHASE',
+    );
+    const invalid = await command(b, 'SubmitAnswer', { ...payload, choiceId: 'not-a-choice' });
+    assert.ok(invalid.status === 'rejected' && invalid.error.code === 'INVALID_CHOICE');
+    f.setTime(Date.parse(initial.state.deadlineAt) - 1);
+    await accepted(command(b, 'SubmitAnswer', payload));
+    f.setTime(Date.parse(initial.state.deadlineAt));
+    const late = await command(b, 'SubmitAnswer', payload);
+    assert.ok(late.status === 'rejected' && late.error.code === 'ANSWER_WINDOW_CLOSED');
+  },
+);
 
 for (const transport of ['polling', 'websocket']) {
   test(
@@ -245,6 +446,286 @@ for (const transport of ['polling', 'websocket']) {
     },
   );
 }
+
+for (const event of ['StartMatch', 'SubmitAnswer'] as const) {
+  for (const boundary of ['before', 'after'] as const) {
+    test(
+      `${event}: revocation ${boundary} admission preserves trusted boundary`,
+      { timeout: 8_000 },
+      async (t) => {
+        const f = await fixture(t),
+          a = await f.connect('alice'),
+          b = await f.connect('bob');
+        const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+        await accepted(command(b, 'JoinMatch', { matchId }));
+        if (event === 'SubmitAnswer') {
+          const started = await accepted(command(a, 'StartMatch', { matchId }));
+          await activeSnapshot(a, started.version);
+        }
+        const payload =
+          event === 'StartMatch'
+            ? { matchId }
+            : {
+                matchId,
+                questionId: demoQuestions()[0]!.id,
+                choiceId: demoQuestions()[0]!.correctChoiceId,
+              };
+        const dispatch = f.coordinator.dispatch.bind(f.coordinator);
+        let admitted: ReturnType<typeof dispatch> | undefined;
+        f.coordinator.dispatch = (player, id, input) => {
+          admitted = dispatch(player, id, input);
+          if (boundary === 'after') void f.auth.sessions.revoke(a.token);
+          return admitted;
+        };
+        if (boundary === 'before') {
+          const act = f.auth.sessions.act.bind(f.auth.sessions);
+          f.auth.sessions.act = (token, action) => {
+            void f.auth.sessions.revoke(token);
+            return act(token, action);
+          };
+        }
+        const gone = new Promise<void>((resolve) => a.socket.once('disconnect', () => resolve()));
+        a.socket.emit(event, { commandId: randomUUID(), payload });
+        await gone;
+        if (boundary === 'before') assert.equal(admitted, undefined);
+        else {
+          assert.ok(admitted);
+          const result = await admitted;
+          assert.ok(result.outcome.status === 'accepted');
+          await activeSnapshot(b, result.outcome.match.version);
+        }
+      },
+    );
+  }
+}
+
+test(
+  'another Host session can act but Start/Answer cannot implicitly subscribe its socket',
+  { timeout: 8_000 },
+  async (t) => {
+    const f = await fixture(t),
+      a = await f.connect('alice'),
+      b = await f.connect('bob'),
+      other = await f.connect('alice');
+    const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+    await accepted(command(b, 'JoinMatch', { matchId }));
+    const start = await accepted(command(other, 'StartMatch', { matchId }));
+    await activeSnapshot(a, start.version);
+    const answered = await accepted(
+      command(other, 'SubmitAnswer', {
+        matchId,
+        questionId: demoQuestions()[0]!.id,
+        choiceId: demoQuestions()[0]!.correctChoiceId,
+      }),
+    );
+    await activeSnapshot(a, answered.version);
+    await barrier(other);
+    assert.deepEqual(other.active, []);
+    assert.deepEqual(other.snapshots, []);
+  },
+);
+
+for (const action of ['logout', 'shutdown'] as const) {
+  test(
+    `active coalescing and ${action} during enrichment preserve accepted Start and delivery authorization`,
+    { timeout: 8_000 },
+    async (t) => {
+      const f = await fixture(t),
+        a = await f.connect('alice'),
+        b = await f.connect('bob');
+      const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+      await accepted(command(b, 'JoinMatch', { matchId }));
+      await snapshot(b, matchId, 2);
+      const release = deferred();
+      t.after(release.resolve);
+      let reads = 0;
+      f.lookup(async (id) => {
+        reads++;
+        await release.promise;
+        return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+      });
+      const startId = randomUUID();
+      const start = await accepted(command(a, 'StartMatch', { matchId }, startId));
+      const retries = await Promise.all(
+        Array.from({ length: 20 }, () => command(a, 'StartMatch', { matchId }, startId)),
+      );
+      assert.ok(retries.every((ack) => JSON.stringify(ack) === JSON.stringify(start)));
+      assert.equal(reads, 2);
+      assert.deepEqual(a.active, []);
+      if (action === 'logout') {
+        const gone = new Promise<void>((resolve) => b.socket.once('disconnect', () => resolve()));
+        assert.equal(
+          (
+            await f.server.inject({
+              method: 'POST',
+              url: '/auth/logout',
+              headers: { ...headers, cookie: b.cookie },
+              payload: {},
+            })
+          ).statusCode,
+          204,
+        );
+        await gone;
+      } else await f.server.close();
+      release.resolve();
+      if (action === 'logout') await activeSnapshot(a, start.version);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.deepEqual(b.active, []);
+      if (action === 'shutdown') assert.deepEqual(a.active, []);
+      assert.equal(reads, 2);
+    },
+  );
+}
+
+test(
+  'stale active enrichment cannot overwrite a newer Answer/REVEAL and viewer results stay private',
+  { timeout: 8_000 },
+  async (t) => {
+    const f = await fixture(t),
+      a = await f.connect('alice'),
+      b = await f.connect('bob');
+    const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+    await accepted(command(b, 'JoinMatch', { matchId }));
+    await snapshot(b, matchId, 2);
+    const release = deferred();
+    t.after(release.resolve);
+    f.lookup(async (id) => {
+      await release.promise;
+      return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+    });
+    const start = await accepted(command(a, 'StartMatch', { matchId }));
+    f.lookup(async (id) => [...f.accounts.values()].find((p) => p.id === id) ?? null);
+    const q = demoQuestions()[0]!;
+    await accepted(
+      command(a, 'SubmitAnswer', { matchId, questionId: q.id, choiceId: q.correctChoiceId }),
+    );
+    const second = await accepted(
+      command(b, 'SubmitAnswer', { matchId, questionId: q.id, choiceId: q.choices[1]!.id }),
+    );
+    await activeSnapshot(a, second.version);
+    await fireDeadline(f, matchId);
+    const av = await activeSnapshot(a, second.version + 1),
+      bv = await activeSnapshot(b, second.version + 1);
+    assert.ok(av.phase === 'REVEAL' && bv.phase === 'REVEAL');
+    assert.equal(av.state.ownResult.selectedChoiceId, q.correctChoiceId);
+    assert.equal(bv.state.ownResult.selectedChoiceId, q.choices[1]!.id);
+    assert.equal(av.state.ownResult.correct, true);
+    assert.equal(bv.state.ownResult.correct, false);
+    assert.deepEqual(Object.keys(av.state), [
+      'questionNumber',
+      'questionCount',
+      'question',
+      'revealEndsAt',
+      'participants',
+      'ownResult',
+    ]);
+    release.resolve();
+    await barrier(a);
+    assert.ok(!a.active.some((s) => s.version === start.version));
+    assert.equal(a.active.at(-1)!.phase, 'REVEAL');
+    assert.deepEqual(
+      a.active.map((s) => s.version),
+      [...new Set(a.active.map((s) => s.version))].sort((x, y) => x - y),
+    );
+  },
+);
+
+test(
+  'active delivery enforces expiry while enrichment is pending without refreshing idle',
+  { timeout: 8_000 },
+  async (t) => {
+    const f = await fixture(t),
+      a = await f.connect('alice'),
+      b = await f.connect('bob');
+    const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+    await accepted(command(b, 'JoinMatch', { matchId }));
+    await snapshot(b, matchId, 2);
+    const release = deferred();
+    t.after(release.resolve);
+    f.lookup(async (id) => {
+      await release.promise;
+      return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+    });
+    f.setTime(100);
+    const start = await accepted(command(a, 'StartMatch', { matchId }));
+    f.setTime(idleMs);
+    const gone = new Promise<void>((resolve) => b.socket.once('disconnect', () => resolve()));
+    release.resolve();
+    await activeSnapshot(a, start.version);
+    await gone;
+    assert.deepEqual(b.active, []);
+    f.setTime(idleMs + 100);
+    assert.equal(await f.auth.sessions.resolve(a.token), null);
+  },
+);
+
+test(
+  'Answer retries coalesce with pending enrichment and timer publication supersedes them safely',
+  { timeout: 8_000 },
+  async (t) => {
+    const f = await fixture(t),
+      a = await f.connect('alice'),
+      b = await f.connect('bob');
+    const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+    await accepted(command(b, 'JoinMatch', { matchId }));
+    const start = await accepted(command(a, 'StartMatch', { matchId }));
+    await activeSnapshot(a, start.version);
+    await activeSnapshot(b, start.version);
+    let reads = 0;
+    const release = deferred();
+    t.after(release.resolve);
+    f.lookup(async (id) => {
+      reads++;
+      await release.promise;
+      return [...f.accounts.values()].find((p) => p.id === id) ?? null;
+    });
+    const payload = {
+        matchId,
+        questionId: demoQuestions()[0]!.id,
+        choiceId: demoQuestions()[0]!.correctChoiceId,
+      },
+      id = randomUUID();
+    const answer = await accepted(command(a, 'SubmitAnswer', payload, id));
+    await Promise.all(Array.from({ length: 20 }, () => command(a, 'SubmitAnswer', payload, id)));
+    assert.equal(reads, 2);
+    await fireDeadline(f, matchId);
+    assert.equal(reads, 4);
+    release.resolve();
+    const reveal = await activeSnapshot(a, answer.version + 1);
+    assert.ok(reveal.phase === 'REVEAL');
+    await barrier(a);
+    assert.equal(reads, 4);
+    assert.ok(!a.active.some((s) => s.version === answer.version));
+    assert.equal(a.active.filter((s) => s.phase === 'REVEAL').length, 1);
+  },
+);
+
+test(
+  'synchronous publication failure preserves accepted Start and a later event can recover projection',
+  { timeout: 8_000 },
+  async (t) => {
+    const f = await fixture(t),
+      a = await f.connect('alice'),
+      b = await f.connect('bob');
+    const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+    await accepted(command(b, 'JoinMatch', { matchId }));
+    await snapshot(b, matchId, 2);
+    const lookup = f.coordinator.lookup.bind(f.coordinator);
+    f.coordinator.lookup = () => {
+      throw new Error('PRIVATE_PUBLICATION_FAILURE');
+    };
+    const start = await accepted(command(a, 'StartMatch', { matchId }));
+    await barrier(a);
+    assert.match(f.logs(), /LOBBY_PROFILE_FAILURE/);
+    assert.doesNotMatch(f.logs(), /PRIVATE_PUBLICATION_FAILURE|LOBBY_COMMAND_FAILURE/);
+    f.coordinator.lookup = lookup;
+    const found = lookup(matchId);
+    assert.ok(found.status === 'found' && found.match.phase === 'QUESTION_OPEN');
+    await command(a, 'StartMatch', { matchId }); // Rejection is still a valid opportunity to recover publication.
+    const projected = await activeSnapshot(a, start.version);
+    assert.equal(projected.phase, 'QUESTION_OPEN');
+  },
+);
 
 test(
   'replayed and in-flight commands retain historical ACKs without socket effects or old broadcasts',
@@ -828,6 +1309,8 @@ test(
     );
     await accepted(command(b, 'LeaveMatch', { matchId }));
     await snapshot(a, matchId, 3);
+    await accepted(command(b, 'JoinMatch', { matchId }));
+    await playTen(f, a, b, matchId);
     await f.server.close();
   },
 );

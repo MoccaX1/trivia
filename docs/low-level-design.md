@@ -1022,6 +1022,28 @@ Enrichment failure preserves the accepted ACK, logs a safe diagnostic, and emits
 no incomplete snapshot. A later valid event can request a fresh projection; no
 automatic recovery worker is implied.
 
+Slice 4 adds `StartMatch` (`{ matchId }`) and `SubmitAnswer`
+(`{ matchId, questionId, choiceId }`) using the same command envelope and callback
+ACK vocabulary. Both admit synchronously inside SessionStore.act and never create
+subscriptions. The server supplies one fixed, ordered ten-question demo pack,
+validated with the Engine's question-set validator before Start admission; content
+failure returns the existing unavailable transport error without admitting Start.
+No client content, timestamps or identity fields are accepted.
+
+`MatchSnapshot` carries the existing envelope and the active/FINISHED projections
+below; `LobbySnapshot` remains WAITING-only. Deadline strings use ISO 8601 UTC.
+Existing per-socket subscriptions continue across phases, with the same final
+non-refreshing authorization and current-version checks. Shared trusted profile
+reads are coalesced by Match/version; private fields are projected for each viewer.
+
+Coordinator exposes one non-awaited post-commit notification boundary for accepted
+mutations, including automatic deadlines. Notifications contain Match identity and
+version; rejections, no-ops and cached retries do not notify. Publication or diagnostic
+failure never invalidates a committed state/receipt. The Gateway detaches on close.
+Active scoreboards read resolved awards through the Engine's shared exact totals
+and competition-ranking calculation; projection does not rescore submissions.
+Live FINISHED does not imply durable persistence or History visibility (§6.9).
+
 ---
 
 #### Question Open Snapshot
@@ -2170,7 +2192,7 @@ Gameplay stays `FINISHED`; see Section 6.9.
 - Timing diagnostics: `receivedAt`, `receiptSequence`, deadline, `finalAnsweredMs`.
 - Transitions: Match identity, previous/next phase, resulting version.
 - Timer/clock infrastructure failures: Match identity and safe failure context;
-  runtime error-level reporting remains a Phase 4 integration follow-up.
+  Slice 4 runtime composition reports these at error level without recovery.
 - Persistence failures: Match identity and failure context.
 - No passwords, hashes, secrets, credential payloads, unnecessary private data, or
   pre-reveal answer keys in ordinary logs/client errors.

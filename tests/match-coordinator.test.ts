@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import test from 'node:test';
 import { MatchCoordinator } from '../src/application/match-coordinator.js';
 import type { CommandReceipt, TimeoutCommand } from '../src/application/match-coordinator.js';
@@ -91,6 +93,148 @@ function lookup(coordinator: MatchCoordinator, matchId: string): MatchState {
   return result.match;
 }
 
+for (const scenario of [
+  'listener-sync',
+  'listener-async',
+  'reporter-sync',
+  'reporter-async',
+  'timer-sync',
+  'timer-async',
+  'listener-thenable',
+  'reporter-thenable',
+  'timer-thenable',
+]) {
+  test(
+    `A4-01 child survives ${scenario} without losing receipts or FIFO`,
+    { timeout: 10_000 },
+    async () => {
+      const { stdout, stderr } = await promisify(execFile)(
+        process.execPath,
+        [
+          '--unhandled-rejections=strict',
+          '--import',
+          'tsx',
+          '--input-type=module',
+          '--eval',
+          `
+      import assert from 'node:assert/strict';
+      import { MatchCoordinator } from './src/application/match-coordinator.ts';
+      import { demoQuestions } from './src/application/demo-questions.ts';
+      const scenario = ${JSON.stringify(scenario)};
+      let time = 0, notifications = 0, reports = 0, timerReports = 0, assimilated = 0;
+      let failSchedule = scenario.startsWith('timer-');
+      const tasks = [];
+      function fault(kind) {
+        if (kind.endsWith('async')) return Promise.resolve().then(() => { throw Error('A4_CALLBACK_FAILURE'); });
+        if (kind.endsWith('thenable')) return { then(_resolve, reject) { assimilated++; reject(Error('A4_THENABLE_FAILURE')); } };
+        throw Error('A4_CALLBACK_FAILURE');
+      }
+      const scheduler = { schedule(at, callback) {
+        if (failSchedule) throw Error('SCHEDULER_FAILURE');
+        const task = { at, callback, cancelled: false }; tasks.push(task);
+        return () => { task.cancelled = true; };
+      }};
+      const coordinator = new MatchCoordinator({ now: () => time }, scheduler, () => 'match', () => {
+        timerReports++; return fault(scenario);
+      });
+      coordinator.observeCommits(() => {
+        notifications++;
+        if (scenario.startsWith('listener-')) return fault(scenario);
+        if (scenario.startsWith('reporter-')) throw Error('NOTIFICATION_FAILURE');
+      }, () => {
+        reports++;
+        if (scenario.startsWith('reporter-')) return fault(scenario);
+      });
+      const turn = () => new Promise(resolve => setImmediate(resolve));
+      try {
+        const first = coordinator.create('host', 'create');
+        assert.strictEqual(coordinator.create('host', 'create'), first);
+        const created = await first;
+        assert.equal(created.outcome.status, 'accepted');
+        console.log('accepted receipt preserved');
+        assert.strictEqual(coordinator.create('host', 'create'), first);
+        await coordinator.dispatch('guest', 'join', { type: 'join', matchId: 'match' });
+        const start = await coordinator.dispatch('host', 'start', { type: 'start', matchId: 'match', questions: demoQuestions() });
+        assert.equal(start.outcome.status, 'accepted');
+        if (scenario.startsWith('timer-')) {
+          assert.equal(timerReports, 1);
+          assert.equal(coordinator.takeTimerFailures().length, 1);
+          assert.equal(tasks.length, 0); // Accepted stall: no timer retry was introduced.
+          failSchedule = false;
+        }
+        const input = { type: 'answer', matchId: 'match', questionId: demoQuestions()[0].id, choiceId: demoQuestions()[0].correctChoiceId };
+        const answer = coordinator.dispatch('host', 'answer', input);
+        assert.strictEqual(coordinator.dispatch('host', 'answer', input), answer);
+        const answered = await answer;
+        assert.equal(answered.outcome.status, 'accepted');
+        assert.equal(answered.outcome.match.version, 4);
+        await turn();
+        const before = notifications, current = coordinator.lookup('match').match;
+        assert.strictEqual(coordinator.dispatch('host', 'answer', input), answer);
+        await coordinator.dispatch('host', 'same-choice', input);
+        await coordinator.dispatch('outsider', 'rejected', input);
+        assert.strictEqual(coordinator.lookup('match').match, current);
+        assert.equal(notifications, before);
+        time = 10_000;
+        const old = tasks.at(-1);
+        if (old) old.callback();
+        else await coordinator.timeout({ type: 'question-deadline', matchId: 'match', questionId: input.questionId, deadlineAt: time });
+        await coordinator.whenIdle('match');
+        assert.equal(coordinator.lookup('match').match.phase, 'REVEAL');
+        assert.equal(coordinator.lookup('match').match.version, 5);
+        if (old) {
+          old.callback(); await coordinator.whenIdle('match');
+          assert.equal(coordinator.lookup('match').match.version, 5);
+        }
+        time = 15_000; tasks.at(-1).callback(); await coordinator.whenIdle('match');
+        assert.equal(coordinator.lookup('match').match.phase, 'QUESTION_OPEN');
+        assert.equal(coordinator.lookup('match').match.currentQuestionIndex, 1);
+        assert.equal(coordinator.lookup('match').match.version, 6);
+        await turn();
+        assert.equal(notifications, 6);
+        assert.equal(reports, scenario.startsWith('timer-') ? 0 : 6);
+        if (scenario.endsWith('thenable')) assert.equal(assimilated, scenario.startsWith('timer-') ? 1 : 6);
+        console.log('survived; subsequent FIFO and timers succeeded');
+      } finally { await coordinator.shutdown(); }
+      await turn();
+    `,
+        ],
+        { timeout: 5_000 },
+      );
+      assert.match(stdout, /accepted receipt preserved/);
+      assert.match(stdout, /survived; subsequent FIFO and timers succeeded/);
+      assert.equal(stderr, ''); // execFile also requires a natural zero exit status.
+    },
+  );
+}
+
+test(
+  'A4-01 indefinitely pending listeners do not block FIFO, replay or shutdown',
+  { timeout: 5_000 },
+  async (t) => {
+    const { coordinator } = setup(t);
+    let notifications = 0;
+    coordinator.observeCommits(
+      () => {
+        notifications++;
+        return new Promise<void>(() => {});
+      },
+      () => assert.fail(),
+    );
+    const first = coordinator.create('host', 'create');
+    assert.strictEqual(coordinator.create('host', 'create'), first);
+    const matchId = state(await first).id;
+    const joined = coordinator.dispatch('second', 'join', { type: 'join', matchId });
+    const third = coordinator.dispatch('third', 'join', { type: 'join', matchId });
+    assert.equal(state(await joined).version, 2);
+    assert.equal(state(await third).version, 3);
+    assert.strictEqual(coordinator.dispatch('second', 'join', { type: 'join', matchId }), joined);
+    await coordinator.dispatch('host', 'eligibility', { type: 'start-eligibility', matchId });
+    assert.equal(notifications, 3);
+    await coordinator.shutdown();
+  },
+);
+
 test('Registry guards duplicate registration, stale updates and immutable aggregates; lookup is explicit', () => {
   const registry = new MatchRegistry();
   const match = createMatch('host', () => 'match').match;
@@ -112,6 +256,93 @@ test('Registry guards duplicate registration, stale updates and immutable aggreg
   registry.close();
   assert.equal(registry.lookup('match').status, 'missing');
   assert.throws(() => registry.register(match), /closed/);
+});
+
+test('post-commit notifications see committed versions, preserve Promise identity and ignore retries/no-ops/stale timers', async (t) => {
+  const { coordinator, clock, scheduler } = setup(t);
+  const changes: number[] = [];
+  const stop = coordinator.observeCommits(
+    ({ matchId, version }) => {
+      assert.equal(lookup(coordinator, matchId).version, version);
+      changes.push(version);
+    },
+    () => assert.fail('Unexpected publication failure'),
+  );
+  const matchId = await running(coordinator);
+  assert.deepEqual(changes, [1, 2, 3]);
+  const input = { type: 'answer' as const, matchId, questionId: 'q0', choiceId: 'a' };
+  const first = coordinator.dispatch('host', 'answer', input);
+  assert.strictEqual(coordinator.dispatch('host', 'answer', input), first);
+  await first;
+  await coordinator.dispatch('host', 'same-choice', input);
+  await coordinator.dispatch('outsider', 'answer', input);
+  assert.deepEqual(changes, [1, 2, 3, 4]);
+  const old = scheduler.latest();
+  clock.time = old.deadline;
+  old.callback();
+  await coordinator.whenIdle(matchId);
+  assert.deepEqual(changes, [1, 2, 3, 4, 5]);
+  old.callback();
+  await coordinator.whenIdle(matchId);
+  assert.deepEqual(changes, [1, 2, 3, 4, 5]);
+  stop();
+  clock.time = scheduler.latest().deadline;
+  scheduler.latest().callback();
+  await coordinator.whenIdle(matchId);
+  assert.deepEqual(changes, [1, 2, 3, 4, 5]);
+});
+
+test('publication and diagnostic exceptions never invalidate accepted receipts or poison queues', async (t) => {
+  const { coordinator } = setup(t);
+  let failures = 0;
+  coordinator.observeCommits(
+    () => {
+      throw new Error('Publication failed');
+    },
+    () => {
+      failures++;
+      throw new Error('Reporting failed');
+    },
+  );
+  const matchId = await lobby(coordinator);
+  assert.equal(lookup(coordinator, matchId).version, 2);
+  assert.equal(failures, 2);
+  const first = coordinator.dispatch('host', 'start', { type: 'start', matchId, questions });
+  assert.equal((await first).outcome.status, 'accepted');
+  assert.strictEqual(
+    coordinator.dispatch('host', 'start', { type: 'start', matchId, questions }),
+    first,
+  );
+  assert.equal(failures, 3);
+});
+
+test('timer failure sink observes committed phase and keeps retained diagnostics without rollback', async () => {
+  const clock = new FakeClock(),
+    scheduler = new FakeScheduler();
+  const diagnostics: string[] = [];
+  const coordinator = new MatchCoordinator(
+    clock,
+    scheduler,
+    () => 'match',
+    ({ matchId }) => {
+      diagnostics.push(lookup(coordinator, matchId).phase);
+      throw new Error('Diagnostic sink failed');
+    },
+  );
+  try {
+    const matchId = await lobby(coordinator);
+    scheduler.fail = true;
+    const first = coordinator.dispatch('host', 'start', { type: 'start', matchId, questions });
+    assert.equal((await first).outcome.status, 'accepted');
+    assert.deepEqual(diagnostics, ['QUESTION_OPEN']);
+    assert.equal(coordinator.takeTimerFailures().length, 1);
+    assert.strictEqual(
+      coordinator.dispatch('host', 'start', { type: 'start', matchId, questions }),
+      first,
+    );
+  } finally {
+    await coordinator.shutdown();
+  }
 });
 
 test('Create namespace and in-flight retries return their original outcome and register exactly once', async (t) => {

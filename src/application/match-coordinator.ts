@@ -47,8 +47,25 @@ function identity(value: string): void {
     throw new TypeError('Invalid trusted application identity');
 }
 
+/** Invoke synchronously; observe async failures without joining FIFO or shutdown. */
+function runCallback(callback: () => unknown, failed?: () => unknown): void {
+  const onFailure = () => {
+    // A failed reporter is contained too, without reporting recursively.
+    if (failed) runCallback(failed);
+  };
+  try {
+    const result = callback();
+    if (result !== undefined) void Promise.resolve(result).catch(onFailure);
+  } catch {
+    onFailure();
+  }
+}
+
 /** One runtime owner: no transport, persistence, projections or gameplay rules. */
 export class MatchCoordinator {
+  #observer:
+    | { notify: (change: { matchId: MatchId; version: number }) => void; failed: () => void }
+    | undefined;
   #registry = new MatchRegistry();
   #queues = new Map<MatchId, Promise<void>>();
   #sequences = new Map<MatchId, number>();
@@ -64,7 +81,29 @@ export class MatchCoordinator {
     private readonly clock: Clock,
     private readonly scheduler: MatchScheduler,
     private readonly generateMatchId: () => MatchId,
+    private readonly reportTimerFailure: (failure: TimerFailure) => void = () => {},
   ) {}
+
+  /** One runtime delivery boundary; never awaited and never part of command success. */
+  observeCommits(
+    notify: (change: { matchId: MatchId; version: number }) => void,
+    failed: () => void,
+  ): () => void {
+    const observer = { notify, failed };
+    this.#observer = observer;
+    return () => {
+      if (this.#observer === observer) this.#observer = undefined;
+    };
+  }
+
+  private committed(match: MatchState): void {
+    const observer = this.#observer;
+    if (!observer || this.#closed) return;
+    runCallback(
+      () => observer.notify({ matchId: match.id, version: match.version }),
+      () => observer.failed(),
+    );
+  }
 
   lookup(matchId: MatchId): MatchLookup {
     identity(matchId);
@@ -83,6 +122,7 @@ export class MatchCoordinator {
       const outcome = engine.createMatch(playerId, this.generateMatchId);
       this.#registry.register(outcome.match);
       this.#sequences.set(outcome.match.id, 1);
+      this.committed(outcome.match);
       return this.receipt(outcome, receivedAt, 1);
     });
     this.track(promise);
@@ -149,6 +189,7 @@ export class MatchCoordinator {
       this.#sequences.clear();
       this.#creates.clear();
       this.#outcomes.clear();
+      this.#observer = undefined;
     });
     return this.#shutdown;
   }
@@ -208,6 +249,7 @@ export class MatchCoordinator {
       if (outcome.status === 'accepted' && outcome.changed) {
         this.#registry.update(lookup.match, outcome.match);
         this.refreshTimer(lookup.match, outcome.match); // Commit precedes scheduling and receipt publication.
+        this.committed(outcome.match);
       }
       return this.receipt(outcome, receivedAt, sequence);
     });
@@ -243,7 +285,9 @@ export class MatchCoordinator {
   }
 
   private failure(matchId: MatchId, error: unknown): void {
-    this.#failures.push(Object.freeze({ matchId, error }));
+    const failure = Object.freeze({ matchId, error });
+    this.#failures.push(failure);
+    runCallback(() => this.reportTimerFailure(failure));
   }
 
   private cancelTimer(matchId: MatchId): void {

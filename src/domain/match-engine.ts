@@ -272,7 +272,7 @@ function deadlineAfter(time: number, duration: number): number | undefined {
   return validTime(time) && validTime(deadline) ? deadline : undefined;
 }
 
-function validQuestionSet(questions: readonly PrivateQuestion[]): boolean {
+export function validQuestionSet(questions: readonly PrivateQuestion[]): boolean {
   const nonblank = (value: string) => typeof value === 'string' && value.trim().length > 0;
   return (
     questions.length === 10 &&
@@ -379,6 +379,44 @@ export function submitAnswer(
 
 export const SCORE_UNITS_PER_POINT = 3_000_000n;
 
+/** Read authoritative resolved awards without scoring again or mutating/versioning the Match. */
+export function matchScoreboard(match: MatchState): readonly {
+  readonly playerId: PlayerId;
+  readonly scoreUnits: bigint;
+  readonly rank: number;
+}[] {
+  if (match.phase === 'FINISHED') {
+    return Object.freeze(
+      match.result.participants.map((entry) =>
+        Object.freeze({
+          playerId: entry.playerId,
+          scoreUnits: entry.finalScoreUnits,
+          rank: entry.finalRank,
+        }),
+      ),
+    );
+  }
+  const totals = match.participants.map((playerId) => ({
+    playerId,
+    scoreUnits:
+      match.phase === 'WAITING'
+        ? 0n
+        : match.resolvedQuestions.reduce((total, question) => {
+            const result = question.results.find((entry) => entry.playerId === playerId);
+            if (!result) throw new Error('Missing participant question result');
+            return total + result.questionScoreUnits;
+          }, 0n),
+  }));
+  return Object.freeze(
+    totals.map((entry) =>
+      Object.freeze({
+        ...entry,
+        rank: 1 + totals.filter((other) => other.scoreUnits > entry.scoreUnits).length,
+      }),
+    ),
+  );
+}
+
 function resolveQuestion(match: QuestionOpenMatch): ResolvedQuestionResult {
   return Object.freeze({
     questionIndex: match.currentQuestionIndex,
@@ -446,27 +484,18 @@ export function revealDeadline(
   if (now < command.deadlineAt) return reject(match, 'DEADLINE_NOT_REACHED');
   if (match.currentQuestionIndex === 9) {
     const version = nextVersion(match.version);
-    const totals = match.participants.map((playerId) => ({
-      playerId,
-      finalScoreUnits: match.resolvedQuestions.reduce((total, question) => {
-        const result = question.results.find((entry) => entry.playerId === playerId);
-        if (!result) throw new Error('Missing participant question result');
-        return total + result.questionScoreUnits;
-      }, 0n),
-    }));
+    const scoreboard = matchScoreboard(match);
     const result: MatchResult = Object.freeze({
       matchId: match.id,
       hostPlayerId: match.hostPlayerId,
       startedAt: match.startedAt,
       finishedAt: now,
       participants: Object.freeze(
-        totals.map((participant) =>
+        scoreboard.map((participant) =>
           Object.freeze({
-            ...participant,
-            // Competition ranking: ties share rank and occupy positions; no secondary tie-breaker.
-            finalRank:
-              1 +
-              totals.filter((other) => other.finalScoreUnits > participant.finalScoreUnits).length,
+            playerId: participant.playerId,
+            finalScoreUnits: participant.scoreUnits,
+            finalRank: participant.rank,
           }),
         ),
       ),

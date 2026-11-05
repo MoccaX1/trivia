@@ -2,6 +2,8 @@ import type { Server, Socket } from 'socket.io';
 import type { MatchCoordinator, CommandReceipt } from '../application/match-coordinator.js';
 import type { PlayerProfile } from '../application/authenticate-player.js';
 import { presentLobby } from '../application/lobby-presenter.js';
+import { presentMatch } from '../application/match-presenter.js';
+import { demoQuestions } from '../application/demo-questions.js';
 import type { Authentication } from './authentication.js';
 import { sessionToken } from './auth-policy.js';
 
@@ -12,6 +14,10 @@ export interface CreateMatchRequest {
 export interface LobbyMatchRequest {
   commandId: string;
   payload: { matchId: string };
+}
+export interface SubmitAnswerRequest {
+  commandId: string;
+  payload: { matchId: string; questionId: string; choiceId: string };
 }
 export type LobbyAcknowledgement =
   | { commandId: string; status: 'accepted'; matchId: string; version: number }
@@ -32,7 +38,7 @@ export interface LobbyRuntime {
   coordinator: MatchCoordinator;
   players: { findPlayerById(playerId: string): Promise<PlayerProfile | null> };
 }
-type Event = 'CreateMatch' | 'JoinMatch' | 'LeaveMatch';
+type Event = 'CreateMatch' | 'JoinMatch' | 'LeaveMatch' | 'StartMatch' | 'SubmitAnswer';
 type Subscription = { playerId: string; version: number };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -44,7 +50,7 @@ function identity(value: unknown): value is string {
 function validRequest(
   event: Event,
   value: unknown,
-): value is CreateMatchRequest | LobbyMatchRequest {
+): value is CreateMatchRequest | LobbyMatchRequest | SubmitAnswerRequest {
   if (
     !record(value) ||
     Object.keys(value).length !== 2 ||
@@ -52,6 +58,13 @@ function validRequest(
     !record(value.payload)
   )
     return false;
+  if (event === 'SubmitAnswer')
+    return (
+      Object.keys(value.payload).length === 3 &&
+      identity(value.payload.matchId) &&
+      identity(value.payload.questionId) &&
+      identity(value.payload.choiceId)
+    );
   return event === 'CreateMatch'
     ? Object.keys(value.payload).length === 0
     : Object.keys(value.payload).length === 1 && identity(value.payload.matchId);
@@ -93,7 +106,7 @@ export function installLobbyGateway(
   function publish(matchId: string): void {
     if (closed) return;
     const found = coordinator.lookup(matchId);
-    if (found.status !== 'found' || found.match.phase !== 'WAITING') return;
+    if (found.status !== 'found') return;
     const match = found.match;
     if (publishing.get(matchId) === match.version) return;
     let needed = false;
@@ -118,13 +131,15 @@ export function installLobbyGateway(
         );
         if (closed) return;
         const current = coordinator.lookup(matchId);
-        if (current.status !== 'found' || current.match.phase !== 'WAITING') return;
+        if (current.status !== 'found') return;
         if (current.match !== match) {
           publish(matchId); // Regenerate only for a real newer commit.
           return;
         }
         if (profiles.some((profile) => profile === null)) throw new Error('Missing lobby profile');
-        const snapshot = presentLobby(match, profiles as PlayerProfile[]);
+        const trustedProfiles = profiles as PlayerProfile[];
+        const lobbySnapshot =
+          match.phase === 'WAITING' ? presentLobby(match, trustedProfiles) : undefined;
         for (const [socket, set] of subscriptions) {
           const token = sessionToken(socket.request.headers.cookie, auth.policy);
           await auth.sessions.inspect(token, (player) => {
@@ -137,8 +152,9 @@ export function installLobbyGateway(
               return;
             }
             if (latest.match !== match || subscription.version >= match.version) return;
+            const snapshot = lobbySnapshot ?? presentMatch(match, trustedProfiles, player.id);
             subscription.version = match.version;
-            socket.emit('LobbySnapshot', snapshot);
+            socket.emit(match.phase === 'WAITING' ? 'LobbySnapshot' : 'MatchSnapshot', snapshot);
           });
         }
         const latest = coordinator.lookup(matchId);
@@ -152,11 +168,22 @@ export function installLobbyGateway(
     })();
   }
 
+  const stopObserving = coordinator.observeCommits(
+    ({ matchId }) => publish(matchId),
+    () => reportFailure('LOBBY_PROFILE_FAILURE'),
+  );
+
   io.on('connection', (socket) => {
     const set = new Map<string, Subscription>();
     subscriptions.set(socket, set);
     socket.once('disconnect', () => subscriptions.delete(socket));
-    for (const event of ['CreateMatch', 'JoinMatch', 'LeaveMatch'] as const) {
+    for (const event of [
+      'CreateMatch',
+      'JoinMatch',
+      'LeaveMatch',
+      'StartMatch',
+      'SubmitAnswer',
+    ] as const) {
       socket.on(event, (value: unknown, callback: unknown) => {
         const commandId =
           record(value) && typeof value.commandId === 'string' ? value.commandId : null;
@@ -175,13 +202,34 @@ export function installLobbyGateway(
         // The callback admits immediately. Neither SQL nor an await can enter this boundary.
         void auth.sessions
           .act(token, (player) => {
-            const operation =
-              event === 'CreateMatch'
-                ? coordinator.create(player.id, value.commandId)
-                : coordinator.dispatch(player.id, value.commandId, {
-                    type: event === 'JoinMatch' ? 'join' : 'leave',
-                    matchId: (value as LobbyMatchRequest).payload.matchId,
-                  });
+            let operation: Promise<CommandReceipt>;
+            switch (event) {
+              case 'CreateMatch':
+                operation = coordinator.create(player.id, value.commandId);
+                break;
+              case 'StartMatch':
+                operation = coordinator.dispatch(player.id, value.commandId, {
+                  type: 'start',
+                  matchId: (value as LobbyMatchRequest).payload.matchId,
+                  questions: demoQuestions(),
+                });
+                break;
+              case 'SubmitAnswer': {
+                const { matchId, questionId, choiceId } = (value as SubmitAnswerRequest).payload;
+                operation = coordinator.dispatch(player.id, value.commandId, {
+                  type: 'answer',
+                  matchId,
+                  questionId,
+                  choiceId,
+                });
+                break;
+              }
+              default:
+                operation = coordinator.dispatch(player.id, value.commandId, {
+                  type: event === 'JoinMatch' ? 'join' : 'leave',
+                  matchId: (value as LobbyMatchRequest).payload.matchId,
+                });
+            }
             const first = !observed.has(operation);
             observed.add(operation);
             // Attach synchronously at admission, so subscription effects follow commit order.
@@ -193,12 +241,18 @@ export function installLobbyGateway(
                   // Leaving removes membership for the Player, invalidating any older socket subscription.
                   for (const entries of subscriptions.values())
                     if (entries.get(matchId)?.playerId === player.id) entries.delete(matchId);
-                } else if (socket.connected) {
+                } else if ((event === 'CreateMatch' || event === 'JoinMatch') && socket.connected) {
                   set.set(matchId, { playerId: player.id, version: 0 });
                 }
               }
               reply(acknowledgement(value.commandId, receipt));
-              if (!closed && result.status !== 'missing') publish(result.match.id);
+              if (!closed && result.status !== 'missing') {
+                try {
+                  publish(result.match.id);
+                } catch {
+                  reportFailure('LOBBY_PROFILE_FAILURE', result.match.id);
+                }
+              }
             });
           })
           .then((admitted) => {
@@ -215,6 +269,7 @@ export function installLobbyGateway(
   });
   return () => {
     closed = true;
+    stopObserving();
     subscriptions.clear();
     publishing.clear();
   };

@@ -27,6 +27,18 @@ export async function runBackend(
       const clock = new SystemClock();
       const scheduler = new NodeMatchScheduler(clock);
       const players = new PlayerRepository(database);
+      const coordinator = new MatchCoordinator(clock, scheduler, randomUUID, ({ matchId }) => {
+        const found = coordinator.lookup(matchId);
+        server?.log.error(
+          {
+            code: 'MATCH_TIMER_FAILURE',
+            matchId,
+            phase: found.status === 'found' ? found.match.phase : undefined,
+            operation: 'deadline',
+          },
+          'Match timer infrastructure failed',
+        );
+      });
       server = createServer({
         logger: { level: config.logLevel },
         auth: {
@@ -39,7 +51,7 @@ export async function runBackend(
           ),
           login: new LoginService(players, () => clock.now()),
         },
-        lobby: { coordinator: new MatchCoordinator(clock, scheduler, randomUUID), players },
+        lobby: { coordinator, players },
       });
     } catch (error) {
       await database.end();

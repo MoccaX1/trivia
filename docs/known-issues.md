@@ -20,16 +20,16 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 
 | Category | OPEN | ACCEPTED | RESOLVED | Total |
 |---|---:|---:|---:|---:|
-| BUG | 0 | 0 | 4 | 4 |
+| BUG | 0 | 0 | 5 | 5 |
 | LIM | 0 | 3 | 0 | 3 |
-| RISK | 2 | 0 | 3 | 5 |
+| RISK | 1 | 0 | 4 | 5 |
 | DEBT | 2 | 0 | 0 | 2 |
 | DEC | 9 | 0 | 4 | 13 |
 | TEST | 4 | 0 | 1 | 5 |
-| OPS | 3 | 0 | 0 | 3 |
-| DEF | 2 | 2 | 1 | 5 |
+| OPS | 2 | 0 | 1 | 3 |
+| DEF | 1 | 2 | 2 | 5 |
 
-Total: **40** records; **5 ACCEPTED**, **22 OPEN**, **13 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **41** records; **5 ACCEPTED**, **19 OPEN**, **17 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
@@ -40,10 +40,8 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 | [LIM-001](#lim-001) | Post-commit deadline scheduling can stall a Match | ACCEPTED | HIGH | current demo |
 | [LIM-002](#lim-002) | Active Matches are lost on process restart | ACCEPTED | HIGH | current demo |
 | [LIM-003](#lim-003) | Completed aggregates and retry receipts retained until shutdown | ACCEPTED | MEDIUM | later hardening |
-| [OPS-001](#ops-001) | Runtime timer failure reporting is not integrated | OPEN | HIGH | before public deployment |
 | [OPS-002](#ops-002) | Production HTTPS, secret and deployment procedures are unspecified | OPEN | HIGH | before public deployment |
 | [OPS-003](#ops-003) | Health is liveness, not operational readiness | OPEN | MEDIUM | before public deployment |
-| [RISK-003](#risk-003) | Private Engine outcomes must never be serialized directly | OPEN | HIGH | before public deployment |
 | [RISK-004](#risk-004) | Development dependency advisories remain unremediated | OPEN | MEDIUM | before public deployment |
 | [DEBT-001](#debt-001) | Repository guidance contains obsolete implementation descriptions | OPEN | LOW | later hardening |
 | [DEBT-002](#debt-002) | Competition ranking clarification is not fully in frozen baseline | OPEN | LOW | current demo |
@@ -60,7 +58,6 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 | [TEST-002](#test-002) | Migration rollback and concurrent-run coverage is incomplete | OPEN | MEDIUM | before public deployment |
 | [TEST-004](#test-004) | Authenticated Match-to-History end-to-end verification absent | OPEN | HIGH | current demo |
 | [TEST-005](#test-005) | Full-checkout manual scripts fail existing lint rules | OPEN | LOW | later hardening |
-| [DEF-002](#def-002) | Safe playable runtime composition remains pending | OPEN | HIGH | current demo |
 | [DEF-003](#def-003) | Completed persistence and authorized History pending | OPEN | HIGH | current demo |
 | [DEF-004](#def-004) | Account recovery and advanced authentication excluded | ACCEPTED | UNDETERMINED | future design |
 | [DEF-005](#def-005) | Bots, tournaments and human score formatting deferred | ACCEPTED | LOW | future design |
@@ -112,15 +109,16 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 <a id="ops-001"></a>
 
-### OPS-001 — Runtime timer failure reporting is not integrated
+### OPS-001 — Runtime timer failure reporting integrated
 
-- **Category / status:** OPS / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** OPS / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Composition/observability; Phase 4. **Target:** before public deployment.
 - **Evidence:** [LLD §8.7](low-level-design.md#87-logging-rules); [takeTimerFailures](../src/application/match-coordinator.ts); [main](../src/main.ts).
-- **Concern:** Failures are drainable in memory. Slice 3 composes the shared Coordinator for WAITING operations, but does not yet consume Match timer diagnostics; Start/timer-driven gameplay transport remains deferred.
-- **Policy / status:** Error-level runtime reporting is explicitly a Phase 4 follow-up.
-- **Impact:** A stalled Match may lack an operator-visible error despite retained diagnostics.
-- **Next action:** Connect safe error reporting at runtime composition without adding recovery.
+- **Concern:** Previously, Match timer failures were retained only in memory without runtime reporting.
+- **Policy / status:** Slice 4 connects a failure sink to error-level runtime logging with a stable code, Match identity, phase and deadline-operation context. Raw errors and private data are excluded; takeTimerFailures remains available. Sink exceptions cannot invalidate accepted receipts.
+- **Verification:** Coordinator fault-injection tests cover post-commit scheduling failure, diagnostic sink failure, retained diagnostics and original receipt replay. Real-clock gameplay and active-timer SIGTERM shutdown passed.
+- **Impact:** Operators can diagnose stalled Matches; automatic recovery remains explicitly excluded (LIM-001).
+- **Next action:** Preserve safe reporting tests; production monitoring/deployment work remains OPS-002.
 - **Related:** LIM-001.
 
 <a id="ops-002"></a>
@@ -179,15 +177,16 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 <a id="risk-003"></a>
 
-### RISK-003 — Private Engine outcomes must never be serialized directly
+### RISK-003 — Phase-safe Engine projections implemented
 
-- **Category / status:** RISK / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** RISK / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Gateway/Presenter; Phase 4. **Target:** before public deployment.
 - **Evidence:** [LLD §§4.8,5.5](low-level-design.md#48-client-presenter--projection); [Engine](../src/domain/match-engine.ts); [boundary notes](../src/README.md).
-- **Concern:** Internal outcomes include answer keys, private submissions and bigint results. Slice 3 adds an explicit WAITING-only Presenter; active-phase and FINISHED projections remain absent.
-- **Policy / status:** Only phase-safe viewer projections may leave the backend.
-- **Impact:** Direct forwarding would leak answers/private data and mishandle bigint JSON. The lobby Gateway emits only allowlisted ACKs/snapshots; internal outcomes remain private.
-- **Next action:** Preserve Slice 3 disclosure tests and implement viewer-safe active/finished projections before exposing those commands. This broader record remains OPEN.
+- **Concern:** Internal outcomes include answer keys, private submissions and bigint results, which must never be serialized directly.
+- **Policy / status:** Slice 4 adds explicit QUESTION_OPEN, REVEAL and FINISHED allowlists alongside the WAITING Presenter. Viewer-only submissions/results are built separately; exact score units use decimal strings and final standings come from immutable MatchResult. No raw history or persistence claim is exposed.
+- **Verification:** Two-client polling/WebSocket and real PostgreSQL tests cover all ten per-question reveals, distinct viewer results, future-answer secrecy, trusted names and terminal fields; stale enrichment, revocation and expiry tests enforce final delivery authorization.
+- **Impact:** Current gameplay transports now use phase-safe projections; future transport fields must preserve these boundaries.
+- **Next action:** Retain disclosure and authorization regressions when adding History or other endpoints.
 - **Related:** DEF-002.
 
 <a id="risk-004"></a>
@@ -278,7 +277,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Component / phase:** Authentication/socket lifecycle; Slice 2. **Target:** before public deployment.
 - **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [LLD §§5.7,10.1](low-level-design.md#101-open-questions).
 - **Concern (historical baseline before Slice 2):** No expiration durations, rotation, logout scope, concurrent-session rules or existing-socket revocation semantics are frozen.
-- **Policy / status:** Approved Slice 2: 30-minute idle, 12-hour absolute; intentional authenticated actions alone refresh idle. Independent sessions coexist; logout revokes current session and closes its sockets. Future synchronous Gateway admission remains DEF-002.
+- **Policy / status:** Approved Slice 2: 30-minute idle, 12-hour absolute; intentional authenticated actions alone refresh idle. Independent sessions coexist; logout revokes current session and closes its sockets. Synchronous Gateway admission is implemented under DEF-002.
 - **Impact:** Long-lived sockets need explicit authorization validity; logout must have defined scope.
 - **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** DEC-001, DEC-003.
@@ -394,10 +393,10 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Category / status:** DEC / OPEN. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Question Provider; Phase 4. **Target:** undecided.
 - **Evidence:** [LLD §4.7](low-level-design.md#47-question-provider); [System §16](system-design.md#16-reliability-and-failure-considerations); [Database §§13,15](database-design.md#13-question-bank-boundary).
-- **Concern:** Engine accepts ten validated ordered questions; Provider implementation/selection policy and permanent source lineage are unsettled. Failure must not partially open a round.
-- **Policy / status:** No randomization/authoring policy may be inferred.
-- **Impact:** Playable integration needs approved content provisioning and a safe failure boundary.
-- **Next action:** Choose minimal approved source/provisioning and define failure handling at Start; leave authoring/lineage policies deferred.
+- **Concern:** Permanent source lineage and future selection/authoring policies remain unsettled. Failure must not partially open a round.
+- **Policy / status:** Slice 4 approves and implements one fixed, meaningful, ordered in-memory ten-question pack. Engine validation runs before Start admission, synchronously without I/O; invalid content cannot partially Start. No randomization, configurable packs or authoring policy is implied.
+- **Impact:** Demo gameplay has a concrete server-owned source. Broader content/lineage decisions remain OPEN without blocking this pack.
+- **Next action:** Preserve pack validation and injection-rejection tests; decide source lineage only when persistence needs it.
 - **Related:** DEF-002.
 
 <a id="dec-012"></a>
@@ -510,16 +509,16 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 <a id="def-002"></a>
 
-### DEF-002 — Safe playable runtime composition remains pending
+### DEF-002 — Safe live gameplay runtime composed
 
-- **Category / status:** DEF / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** DEF / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Gateway/Presenter/Provider; Phase 4. **Target:** current demo.
 - **Evidence:** [HLD §§3,10–11](HLD_Component_Diagram.md#3-realtime-gateway); [main](../src/main.ts); [boundary notes](../src/README.md).
-- **Concern:** Slice 3 now wires one shared Coordinator into main and implements authenticated Create/Join/non-Host Leave, per-socket subscriptions and a WAITING Presenter. Start/Answer transport, active-phase projections, Question Provider and timer-driven delivery remain absent.
-- **Policy / status:** Lobby admission runs synchronously inside SessionStore.act; snapshot delivery uses non-refreshing inspect. Replays retain historical ACKs without reapplying subscriptions. Trusted profile enrichment happens after commit, and failure preserves accepted outcomes with safe diagnostics. Full playable integration remains OPEN.
-- **Verification:** Slice 3 full suite: 163 passed, 0 failed, 0 skipped with disposable PostgreSQL; S2-01 regressions: 7 passed. A clean tools-image `npm run check`, Compose backend/PostgreSQL health checks, two-client authenticated lobby smoke and active-client SIGTERM shutdown passed. Full-checkout manual-script lint/format debt remains TEST-005.
-- **Impact:** The backend supports a multiplayer WAITING lobby, not a complete playable M1 Match.
-- **Next action:** Add approved question provisioning and active-phase Gateway/Presenter integration in later slices; preserve FIFO, session admission and private-state isolation.
+- **Concern:** Prior integration stopped at WAITING, despite complete pure Engine gameplay.
+- **Policy / status:** Slice 4 connects trusted Start/Answer, fixed server content, Engine-owned running scoreboards, viewer-safe active/FINISHED MatchSnapshot and timer-driven post-commit publication. Existing subscriptions, synchronous SessionStore.act admission, FIFO, Promise identity and historical ACKs are preserved. Live FINISHED is explicitly not durable History.
+- **Verification:** Slice 4 full suite with disposable PostgreSQL: **188 passed, 0 failed, 0 skipped** (Slice 3 baseline: 169). Targeted domain/gameplay tests: **37 passed**; S2-01/A3-01 regressions: **13 passed**; all zero failed/skipped. Typecheck/build and scoped lint/format passed. Two real authenticated clients (polling/WebSocket) completed ten real-clock question/reveal cycles, then live FINISHED. A second Match shut down with an active question timer and connected users, exit 0. Historical lint/format debt remains TEST-005.
+- **Impact:** A complete live backend Match is playable; full M1 still requires atomic completion persistence and authorized History (DEF-003, TEST-004).
+- **Next action:** Implement separately approved persistence/History work; preserve active gameplay and A3-01 regressions. No recovery or reconnect policy was added.
 - **Related:** RISK-003, DEC-011, TEST-004.
 
 <a id="def-003"></a>
@@ -629,6 +628,20 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 - **Remaining scope:** Full-checkout lint still reports five pre-existing manual-script errors and formatting flags six manual scripts. Dependency advisories remain open. Browser/TLS deployment and future Gateway admission are separate verification/integration work.
 - **Next action:** Preserve route-level protection and encoded-path regressions on future authentication routes. No remaining S2-01 bypass was found in the reviewed routes.
 - **Related:** RISK-002, RISK-004, TEST-005, DEF-002.
+
+<a id="bug-005"></a>
+
+### BUG-005 — A4-01: Unhandled async Coordinator callback rejections
+
+- **Category / status:** BUG / RESOLVED. **Severity / priority:** MEDIUM / P1 (independent audit recommendation).
+- **Component / phase:** Coordinator notification/reporting callbacks; Phase 4 Slice 4. **Target:** current demo, before extending callback integration.
+- **Evidence:** [Coordinator callback containment](../src/application/match-coordinator.ts); A4-01 child-process regressions in [Coordinator tests](../tests/match-coordinator.test.ts).
+- **Concern:** Callback invocation caught synchronous throws but ignored returned Promise rejections. Async notification, notification-error reporter and timer-diagnostic callbacks could terminate Node after an accepted receipt. Current Gateway/runtime registrations were synchronous; no normal client-triggered path was established.
+- **Remediation:** A local helper invokes callbacks immediately and observes returned Promise/thenable rejections without awaiting them. A functioning notification-error reporter still runs; its own synchronous/async failure is contained without recursive reporting. Timer failures remain retained before their sink is invoked. Core Engine/Registry errors and original command Promises are untouched.
+- **Verification:** Before remediation, three async child scenarios exited 1 after accepted receipts; three thenable scenarios failed because rejection/diagnostic handling never ran. Afterward all nine sync/async/thenable children exited naturally 0 under strict unhandled-rejection handling. A tenth test confirms indefinitely pending listeners do not block FIFO, replay or shutdown. Full suite with disposable PostgreSQL: **198 passed, 0 failed, 0 skipped** (baseline 188); Coordinator suite: **33 passed**; S2-01/A3-01 regressions: **13 passed**, all zero failed/skipped. Typecheck/build and scoped lint/format passed. Authenticated HTTP/polling/WebSocket smoke passed Start/Answer/replay and automatic real-clock REVEAL; SIGTERM with active question/reveal timers and connected users exited 0.
+- **Remaining scope:** Side effects are best-effort and are not awaited, cancelled or drained by Coordinator shutdown. No retry worker, additional queue, recovery policy, gameplay or transport change was introduced. Historical tooling/dependency issues remain open.
+- **Next action:** Preserve child-process survival, thenable, pending-listener, receipt identity and timer regressions for future callback integrations.
+- **Related:** OPS-001, LIM-001, RISK-005.
 
 ## 10. Historical coverage and evidence limitations
 
