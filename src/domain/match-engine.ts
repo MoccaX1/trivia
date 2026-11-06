@@ -379,6 +379,13 @@ export function submitAnswer(
 
 export const SCORE_UNITS_PER_POINT = 3_000_000n;
 
+/** Shared M1 award arithmetic, also used to validate completed facts at storage boundaries. */
+export function correctAnswerScore(attemptCount: 1 | 2 | 3, finalAnsweredMs: number): bigint {
+  return (
+    (10n * SCORE_UNITS_PER_POINT) / BigInt(attemptCount) + BigInt(10_000 - finalAnsweredMs) * 3_000n
+  );
+}
+
 /** Read authoritative resolved awards without scoring again or mutating/versioning the Match. */
 export function matchScoreboard(match: MatchState): readonly {
   readonly playerId: PlayerId;
@@ -428,8 +435,7 @@ function resolveQuestion(match: QuestionOpenMatch): ResolvedQuestionResult {
         const correct = submission?.choiceId === match.currentQuestion.correctChoiceId;
         const questionScoreUnits =
           correct && submission
-            ? (10n * SCORE_UNITS_PER_POINT) / BigInt(submission.attemptCount) +
-              BigInt(10_000 - submission.finalAnsweredMs) * 3_000n
+            ? correctAnswerScore(submission.attemptCount, submission.finalAnsweredMs)
             : 0n;
         return Object.freeze({ playerId, submission, correct, questionScoreUnits });
       }),

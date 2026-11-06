@@ -1518,6 +1518,30 @@ content is an invariant violation. History reads committed data only.
 See [database design](database-design.md) for field mapping and constraints.
 Durable completion does not provide active-Match restart recovery.
 
+Slice 5 captures each immutable FINISHED result synchronously after Registry commit,
+through an application-owned completion boundary independent of the Gateway observer.
+Capture also runs for already-admitted work during shutdown drain, before Registry
+cleanup. SQL starts outside FIFO execution. One automatic attempt per completion
+is tracked as pending, succeeded, failed or unconfirmed; explicit in-process retry
+coalesces active attempts and stops after confirmed success or a known conflict.
+No public retry endpoint, automatic retry loop or client durability status is added.
+
+Equivalence compares all approved SQL facts: Match/participant metadata, timestamps,
+question positions/text, Choice keys/text/order/correct key, final submissions or
+explicit no-answer rows, exact awards and standings. Engine-only played-question IDs
+and opening/deadline clocks are not additional durable fields. Correctness follows
+the persisted selected/correct keys. No source-lineage columns are selected for M1.
+An unacknowledged COMMIT remains unconfirmed even if a subsequent ROLLBACK responds;
+retry verifies the entire committed graph. Errors use stable classifications only.
+
+Shutdown stops Gateway ingress/delivery, cancels timers and drains admitted commands
+while completion capture remains active. The completion owner then closes intake and
+awaits tracked saves before PostgreSQL closes. Production reuses the existing shared
+10-second process watchdog, including pool cleanup; it reports outstanding saves as
+unconfirmed and exits nonzero on expiry. Failed/unconfirmed completion drain also
+causes nonzero cleanup status. Embedded server callers own their shutdown bound.
+No successful durability or finish-to-commit crash delivery is implied by FINISHED.
+
 #### Dependency Direction
 
 The intended dependency direction is:
@@ -2298,8 +2322,8 @@ reconstruction, and all phase transitions using controlled time.
 - Stored versus derived completed participant count.
 - Permanent source Question/Choice lineage; snapshots remain independently reconstructable.
 - Authentication/session decisions are settled in §5.7; password-creation policy remains open.
-- SQL identifier representations other than Player UUIDs, and deletion/retention
-  policy, remain unfrozen in database design.
+- Source-lineage identifier representations and deletion/retention policy remain
+  unfrozen; Slice 5 approves Player/Match UUIDs and the documented composite keys.
 
 ### 10.2 Explicitly Deferred
 

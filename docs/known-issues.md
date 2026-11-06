@@ -354,10 +354,10 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Category / status:** DEC / OPEN. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Persistence; Phase 4 onward. **Target:** undecided.
 - **Evidence:** [Database §§4,15](database-design.md#15-open-and-deferred-database-decisions).
-- **Concern:** Only Player IDs and referencing FKs have approved UUID representation; other SQL IDs and deletion/retention remain open.
-- **Policy / status:** Player UUID does not determine Match/History SQL type.
-- **Impact:** Blocks final completed-History migration choices and lifecycle operations.
-- **Next action:** Approve narrowly needed types before completion schema; do not invent deletion rules.
+- **Concern:** Source-lineage identifiers and deletion/retention remain open.
+- **Policy / status:** Slice 5 explicitly approves native Match UUIDs, existing Player UUIDs, composite dependent keys and authoritative millisecond TIMESTAMPTZ. Migration 003 implements these; no new surrogate IDs, purge or deletion policy is introduced.
+- **Impact:** The completed schema can support the approved snapshot graph; broader lifecycle/source-lineage choices remain open.
+- **Next action:** Decide retention or source lineage only for separately approved work; do not infer a deletion workflow from persistence.
 - **Related:** DEF-003.
 
 <a id="dec-009"></a>
@@ -473,10 +473,10 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Category / status:** TEST / OPEN. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Integration; Phase 4. **Target:** current demo.
 - **Evidence:** [LLD §9.9](low-level-design.md#99-end-to-end-critical-path); [transport tests](../tests/server.test.ts); [main](../src/main.ts).
-- **Concern:** Tests cover domain/runtime and raw transport separately; authentication sessions, Gateway/Presenter and completed persistence are not composed.
-- **Policy / status:** Later Phase 4 work; not a defect in completed pure slices.
-- **Impact:** Cannot claim one authenticated playable durable M1 Match works end to end.
-- **Next action:** After required integrations, test two authenticated Players through FINISHED, atomic persistence and authorized History.
+- **Concern:** Slice 5 verifies authenticated gameplay through automatic atomic completion and independent database readback, but History endpoints/authorization remain absent.
+- **Policy / status:** Two-client PostgreSQL integration compares the complete durable graph with Engine MatchResult. Real-clock polling/WebSocket smoke verifies ten reveals, commit and independent readback. This record remains OPEN for authorized History.
+- **Impact:** Live gameplay-to-storage is verified; full authenticated Match-to-History retrieval is not yet available.
+- **Next action:** Add separately approved History List/Detail tests without weakening current gameplay, completion or session regressions.
 - **Related:** DEF-001, DEF-002, DEF-003.
 
 <a id="test-005"></a>
@@ -528,10 +528,11 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Category / status:** DEF / OPEN. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Persistence/History; Phase 4. **Target:** current demo.
 - **Evidence:** [Database §§9–11](database-design.md#9-completed-match-persistence); [migrations](../migrations/001_player_identity.sql); [LLD §6.9](low-level-design.md#69-persist-completed-match).
-- **Concern:** No completion tables/repository/History routes exist.
-- **Policy / status:** One immutable result must commit atomically; identical full-result retries succeed and conflicting results fail; Detail requires participation.
-- **Impact:** FINISHED is not durable History success; process loss before commit has no crash-recovery guarantee.
-- **Next action:** Implement transaction and full-result comparison, then authorized bounded History and rollback/retry tests.
+- **Concern:** Slice 5 implements completed storage; HTTP/Socket.IO History APIs remain excluded and absent.
+- **Policy / status:** Migration 003 stores the five-table graph with UUIDs, millisecond timestamps, bigint scores, composite membership FKs and a deferred correct-choice FK. The repository commits atomically or verifies complete durable equivalence. Application ownership captures FINISHED before Registry cleanup, tracks one active attempt per Match, and exposes controlled in-process retry with pending/succeeded/failed/unconfirmed outcomes. Gateway observer/public wire contracts remain unchanged.
+- **Verification:** Full suite with disposable PostgreSQL: **214 passed, 0 failed, 0 skipped** (baseline 198). Tests cover real concurrent saves/conflicts, atomic rollback/visibility, lost COMMIT response, explicit retry, live FINISHED isolation from write failure, FIFO/shutdown capture and the existing 10-second watchdog. Real-clock two-client gameplay produced ten reveals, automatic commit and fresh-connection readback of 10 questions/40 choices/20 answers, exact standings and timestamps; active-client SIGTERM exited 0. Exact schema BIGINT stress beyond JS safe integers was tested inside a rolled-back SQL transaction, not misrepresented as a legal M1 award.
+- **Impact:** FINISHED remains live state, not a client durability guarantee. History becomes visible only after commit; finish-to-commit process loss remains unrecoverable in M1. Nonconfirmed shutdown drain exits nonzero; no automatic retry worker or additional timeout budget was added.
+- **Next action:** Discover/approve bounded, participant-authorized History List/Detail contracts. Preserve failure diagnostics, ambiguity resolution, complete equivalence and lifecycle tests.
 - **Related:** DEC-008, DEC-009, TEST-004.
 
 <a id="def-004"></a>

@@ -9,6 +9,8 @@ import { MemorySessionStore } from './application/sessions.js';
 import { SystemClock, NodeMatchScheduler } from './runtime/match-time.js';
 import { readAuthPolicy } from './transport/auth-policy.js';
 import { MatchCoordinator } from './application/match-coordinator.js';
+import { MatchCompletions } from './application/match-completions.js';
+import { CompletedMatchRepository } from './persistence/completed-matches.js';
 
 // Log stable failure codes only: driver messages/stacks can contain credentials.
 function failureCode(error: unknown) {
@@ -20,6 +22,7 @@ export async function runBackend(
   config: ReturnType<typeof readConfig>,
   server: ReturnType<typeof createServer> | undefined = undefined,
   database = connectPostgres(config.database),
+  completions: MatchCompletions | undefined = undefined,
 ) {
   if (!server) {
     try {
@@ -27,18 +30,29 @@ export async function runBackend(
       const clock = new SystemClock();
       const scheduler = new NodeMatchScheduler(clock);
       const players = new PlayerRepository(database);
-      const coordinator = new MatchCoordinator(clock, scheduler, randomUUID, ({ matchId }) => {
-        const found = coordinator.lookup(matchId);
-        server?.log.error(
-          {
-            code: 'MATCH_TIMER_FAILURE',
-            matchId,
-            phase: found.status === 'found' ? found.match.phase : undefined,
-            operation: 'deadline',
-          },
-          'Match timer infrastructure failed',
-        );
+      completions = new MatchCompletions(new CompletedMatchRepository(database), (outcome) => {
+        const context = { ...outcome, operation: 'completion-save' };
+        if (outcome.status === 'succeeded') server?.log.info(context, 'Match completion committed');
+        else server?.log.error(context, 'Match completion not confirmed');
       });
+      const coordinator = new MatchCoordinator(
+        clock,
+        scheduler,
+        randomUUID,
+        ({ matchId }) => {
+          const found = coordinator.lookup(matchId);
+          server?.log.error(
+            {
+              code: 'MATCH_TIMER_FAILURE',
+              matchId,
+              phase: found.status === 'found' ? found.match.phase : undefined,
+              operation: 'deadline',
+            },
+            'Match timer infrastructure failed',
+          );
+        },
+        completions,
+      );
       server = createServer({
         logger: { level: config.logLevel },
         auth: {
@@ -52,6 +66,7 @@ export async function runBackend(
           login: new LoginService(players, () => clock.now()),
         },
         lobby: { coordinator, players },
+        completions,
       });
     } catch (error) {
       await database.end();
@@ -68,6 +83,7 @@ export async function runBackend(
 
   function boundShutdown() {
     deadline ??= setTimeout(() => {
+      completions?.reportPending();
       console.error('Backend shutdown exceeded 10 seconds');
       process.exit(1);
     }, 10_000);

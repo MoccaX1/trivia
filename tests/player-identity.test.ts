@@ -47,7 +47,11 @@ test(
     assert.ok(
       applied.length === 0 ||
         applied.every((name) =>
-          ['001_player_identity.sql', '002_canonical_username.sql'].includes(name),
+          [
+            '001_player_identity.sql',
+            '002_canonical_username.sql',
+            '003_completed_matches.sql',
+          ].includes(name),
         ),
     );
     assert.deepEqual(await applyMigrations(pool), []);

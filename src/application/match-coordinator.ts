@@ -9,6 +9,7 @@ import type {
 import { MatchRegistry } from './match-registry.js';
 import type { MatchLookup } from './match-registry.js';
 import type { Clock, MatchScheduler } from './match-time.js';
+import type { MatchCompletions } from './match-completions.js';
 
 export type PlayerCommand =
   | { readonly type: 'join' | 'leave' | 'start-eligibility'; readonly matchId: MatchId }
@@ -82,6 +83,7 @@ export class MatchCoordinator {
     private readonly scheduler: MatchScheduler,
     private readonly generateMatchId: () => MatchId,
     private readonly reportTimerFailure: (failure: TimerFailure) => void = () => {},
+    private readonly completions?: MatchCompletions,
   ) {}
 
   /** One runtime delivery boundary; never awaited and never part of command success. */
@@ -248,6 +250,8 @@ export class MatchCoordinator {
       const outcome = execute(lookup.match);
       if (outcome.status === 'accepted' && outcome.changed) {
         this.#registry.update(lookup.match, outcome.match);
+        // Capture survives Gateway closure and closed ingress while admitted FIFO work drains.
+        if (outcome.match.phase === 'FINISHED') this.completions?.capture(outcome.match.result);
         this.refreshTimer(lookup.match, outcome.match); // Commit precedes scheduling and receipt publication.
         this.committed(outcome.match);
       }

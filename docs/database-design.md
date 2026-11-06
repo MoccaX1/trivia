@@ -48,8 +48,9 @@ Cardinality bounds and complete question/result coverage are validated at comple
 
 Logical names/keys below are contracts, not production migration SQL.
 Unless explicitly nullable/optional, listed durable fields are required (`NOT NULL`).
-Player IDs and foreign keys referencing them use PostgreSQL `UUID`. Other SQL
-identifier types and deletion/retention policies are not frozen.
+Player and Match IDs, and foreign keys referencing them, use PostgreSQL `UUID`.
+Completed timestamps use `TIMESTAMPTZ(3)` with authoritative Engine milliseconds.
+Source-lineage identifier types and deletion/retention policies remain unfrozen.
 
 ### 4.1 PLAYER
 
@@ -90,10 +91,10 @@ linking are outside M1.
 ### 4.3 GAME_MATCH
 
 ```text
-id               PK
+id               UUID, PK
 host_player_id   FK → PLAYER(id)
-started_at       required
-finished_at      required, immutable completion time
+started_at       TIMESTAMPTZ(3), required
+finished_at      TIMESTAMPTZ(3), required, immutable completion time
 ```
 
 Only completed Matches are stored. Require `started_at < finished_at`.
@@ -356,8 +357,8 @@ Only the Match Engine mutates authoritative live gameplay.
 
 ## 15. Open and Deferred Database Decisions
 
-- SQL identifier types other than Player UUIDs, including Match and completed-History
-  identifiers, and retention/deletion policies.
+- Source-lineage identifier representations and retention/deletion policies;
+  Player/Match UUIDs and dependent composite keys are approved for Slice 5.
 - External History cursor, page-size limits, response metadata, invalid-cursor behavior.
 - Stored versus derived completed participant count.
 - Permanent source Question/Choice lineage and any future source FK policy.

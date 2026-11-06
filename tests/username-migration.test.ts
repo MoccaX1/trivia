@@ -96,7 +96,7 @@ for (const kind of ['collision', 'invalid-existing', 'preservation'] as const) {
         return;
       }
       const results = await Promise.all([applyMigrations(pool), applyMigrations(pool)]);
-      assert.deepEqual(results.flat(), ['002_canonical_username.sql']);
+      assert.deepEqual(results.flat(), ['002_canonical_username.sql', '003_completed_matches.sql']);
       assert.deepEqual(
         (await pool.query('SELECT player_id, username,password_hash FROM password_credential'))
           .rows,

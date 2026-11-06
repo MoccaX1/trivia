@@ -7,15 +7,18 @@ import type { Authentication } from './authentication.js';
 import { allowedOrigin, secureRequest } from './auth-policy.js';
 import { installLobbyGateway } from './lobby-gateway.js';
 import type { LobbyRuntime } from './lobby-gateway.js';
+import type { MatchCompletions } from '../application/match-completions.js';
 
 export function createServer({
   logger = false,
   auth,
   lobby,
+  completions,
 }: {
   logger?: boolean | { level: string; stream?: Writable };
   auth?: Authentication;
   lobby?: LobbyRuntime;
+  completions?: MatchCompletions;
 } = {}) {
   if (lobby && !auth) throw new TypeError('Lobby requires authentication');
   const http = Fastify({
@@ -95,6 +98,7 @@ export function createServer({
     closeLobby?.();
     try {
       await lobby?.coordinator.shutdown();
+      await completions?.close();
     } finally {
       auth?.login.close();
       try {

@@ -12,6 +12,12 @@ import { presentLobby } from '../src/application/lobby-presenter.js';
 import type { LobbySnapshot } from '../src/application/lobby-presenter.js';
 import type { MatchSnapshot } from '../src/application/match-presenter.js';
 import { demoQuestions } from '../src/application/demo-questions.js';
+import { MatchCompletions } from '../src/application/match-completions.js';
+import {
+  CompletedMatchRepository,
+  readDurableMatch,
+} from '../src/persistence/completed-matches.js';
+import { CompletionError, durableMatch } from '../src/application/completed-match.js';
 import { createMatch, startMatch } from '../src/domain/match-engine.js';
 import { MatchCoordinator } from '../src/application/match-coordinator.js';
 import { LoginService } from '../src/application/login.js';
@@ -76,7 +82,11 @@ async function barrier(client: Client) {
   assert.equal(ack.status, 'error');
 }
 
-async function fixture(t: TestContext, repository?: PlayerRepository) {
+async function fixture(
+  t: TestContext,
+  repository?: PlayerRepository,
+  completions?: MatchCompletions,
+) {
   let now = 0;
   const tasks = new Set<{ at: number; callback: (error?: unknown) => void }>();
   const clock = { now: () => now };
@@ -119,7 +129,7 @@ async function fixture(t: TestContext, repository?: PlayerRepository) {
   let readProfile = repository
     ? (id: string) => repository.findPlayerById(id)
     : async (id: string) => [...accounts.values()].find((player) => player.id === id) ?? null;
-  const coordinator = new MatchCoordinator(clock, scheduler, randomUUID);
+  const coordinator = new MatchCoordinator(clock, scheduler, randomUUID, () => {}, completions);
   let logs = '';
   const stream = new Writable({
     write(chunk, _encoding, done) {
@@ -131,6 +141,7 @@ async function fixture(t: TestContext, repository?: PlayerRepository) {
     logger: { level: 'error', stream },
     auth,
     lobby: { coordinator, players: { findPlayerById: (id) => readProfile(id) } },
+    ...(completions ? { completions } : {}),
   });
   const clients: Client[] = [];
   t.after(async () => {
@@ -728,6 +739,43 @@ test(
 );
 
 test(
+  'failed completion persistence preserves live FINISHED and controlled retry never changes snapshots',
+  { timeout: 8_000 },
+  async (t) => {
+    let reject!: (error: unknown) => void;
+    const pending = new Promise<void>((_resolve, no) => {
+      reject = no;
+    });
+    let calls = 0;
+    const completions = new MatchCompletions({
+      save: async () => {
+        if (++calls === 1) await pending;
+      },
+    });
+    const f = await fixture(t, undefined, completions),
+      a = await f.connect('alice'),
+      b = await f.connect('bob');
+    const { matchId } = await accepted(command(a, 'CreateMatch', {}));
+    await accepted(command(b, 'JoinMatch', { matchId }));
+    await playTen(f, a, b, matchId);
+    const before = f.coordinator.lookup(matchId);
+    assert.ok(before.status === 'found' && before.match.phase === 'FINISHED');
+    const snapshots = a.active.length;
+    reject(new CompletionError('COMPLETION_UNCONFIRMED'));
+    assert.equal((await completions.capture(before.match.result)).status, 'unconfirmed');
+    const retry = completions.retry(matchId);
+    assert.strictEqual(completions.retry(matchId), retry);
+    assert.equal((await retry).status, 'succeeded');
+    const after = f.coordinator.lookup(matchId);
+    assert.ok(after.status === 'found');
+    assert.strictEqual(after.match, before.match);
+    await barrier(a);
+    assert.equal(a.active.length, snapshots);
+    assert.equal(calls, 2);
+  },
+);
+
+test(
   'replayed and in-flight commands retain historical ACKs without socket effects or old broadcasts',
   { timeout: 8_000 },
   async (t) => {
@@ -1297,7 +1345,8 @@ test(
     const repository = new PlayerRepository(pool);
     const aProfile = await provisionPlayer(repository, 'Alice', ' Nguyễn 👩‍💻 ', 'fixture-password');
     const bProfile = await provisionPlayer(repository, 'Bob', 'Đặng', 'fixture-password');
-    const f = await fixture(t, repository),
+    const completions = new MatchCompletions(new CompletedMatchRepository(pool));
+    const f = await fixture(t, repository, completions),
       a = await f.connect('ALICE'),
       b = await f.connect('bob');
     const { matchId } = await accepted(command(a, 'CreateMatch', {}));
@@ -1311,6 +1360,17 @@ test(
     await snapshot(a, matchId, 3);
     await accepted(command(b, 'JoinMatch', { matchId }));
     await playTen(f, a, b, matchId);
+    const finished = f.coordinator.lookup(matchId);
+    assert.ok(finished.status === 'found' && finished.match.phase === 'FINISHED');
+    assert.equal((await completions.capture(finished.match.result)).status, 'succeeded');
+    assert.equal(completions.outcome(matchId)?.attempt, 1);
+    const fresh = new pg.Client({ ...config, options: `-c search_path=${schema}` });
+    await fresh.connect();
+    try {
+      assert.deepEqual(await readDurableMatch(fresh, matchId), durableMatch(finished.match.result));
+    } finally {
+      await fresh.end();
+    }
     await f.server.close();
   },
 );
