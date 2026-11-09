@@ -70,7 +70,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** LIM / ACCEPTED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Coordinator/Timer; Phase 3. **Target:** current demo.
-- **Evidence:** [System §16](system-design.md#16-reliability-and-failure-considerations); [LLD §4.5](low-level-design.md#45-timer--clock); [fault injection](../manual-scheduler-failure-test.ts); [regression tests](../tests/match-coordinator.test.ts).
+- **Evidence:** [System §16](system-design.md#16-reliability-and-failure-considerations); [LLD §4.5](low-level-design.md#45-timer--clock); [fault injection](../backend/manual-scheduler-failure-test.ts); [regression tests](../backend/tests/match-coordinator.test.ts).
 - **Concern:** schedule() can throw after QUESTION_OPEN commits, leaving no deadline timer.
 - **Policy / status:** Preserve committed state and accepted receipt; retain failure. No automatic retry, rollback, deadline extension, or fatal shutdown for this failure.
 - **Impact:** A Match may stall while the backend remains alive; gameplay correctness is unchanged.
@@ -96,7 +96,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** LIM / ACCEPTED. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Coordinator; Phase 3. **Target:** later hardening.
-- **Evidence:** [LLD §4.3](low-level-design.md#43-match-coordinator); [Coordinator](../src/application/match-coordinator.ts).
+- **Evidence:** [LLD §4.3](low-level-design.md#43-match-coordinator); [Coordinator](../backend/src/application/match-coordinator.ts).
 - **Concern:** Completed aggregates and cached outcomes have no TTL or eviction; idle queues are released and obsolete timers cancelled.
 - **Policy / status:** Process-local retention until shutdown is approved, including separate Create and per-Player/per-Match namespaces.
 - **Impact:** Memory grows with process lifetime, Match count, and unique command IDs; restart removes replay capability.
@@ -109,7 +109,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** LIM / ACCEPTED. **Severity / priority:** MEDIUM / P2.
 - **Component / phase:** Durable History integrity validation; Phase 4 Slice 6. **Target:** current demo.
-- **Evidence:** [LLD History integrity boundary](low-level-design.md#approved-history-http-contract-phase-4-slice-6); [History reader](../src/persistence/history.ts); [Database §§4.6,5,8.4](database-design.md#46-match_question_choice_snapshot).
+- **Evidence:** [LLD History integrity boundary](low-level-design.md#approved-history-http-contract-phase-4-slice-6); [History reader](../backend/src/persistence/history.ts); [Database §§4.6,5,8.4](database-design.md#46-match_question_choice_snapshot).
 - **Concern:** Independent disposable-SQL probes removed an unused trailing Choice or a non-Host participant and their answers, preserving constraints and a coherent smaller graph; History returned 200. No approved writer/client path producing these modifications was established.
 - **Policy / status:** Explicitly accepted M1 limitation. Reads detect structural contradictions, schema violations and provably missing relationships/results, plus score/rank/answer inconsistencies where stored authoritative evidence suffices. They do not detect every direct rewrite producing another valid graph; original cardinality is not independently recorded.
 - **Impact:** Atomic/idempotent application persistence and structural read validation do not establish arbitrary SQL tamper detection. Existing detectable-corruption checks remain mandatory and return safe 500 responses.
@@ -124,7 +124,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** OPS / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Composition/observability; Phase 4. **Target:** before public deployment.
-- **Evidence:** [LLD §8.7](low-level-design.md#87-logging-rules); [takeTimerFailures](../src/application/match-coordinator.ts); [main](../src/main.ts).
+- **Evidence:** [LLD §8.7](low-level-design.md#87-logging-rules); [takeTimerFailures](../backend/src/application/match-coordinator.ts); [main](../backend/src/main.ts).
 - **Concern:** Previously, Match timer failures were retained only in memory without runtime reporting.
 - **Policy / status:** Slice 4 connects a failure sink to error-level runtime logging with a stable code, Match identity, phase and deadline-operation context. Raw errors and private data are excluded; takeTimerFailures remains available. Sink exceptions cannot invalidate accepted receipts.
 - **Verification:** Coordinator fault-injection tests cover post-commit scheduling failure, diagnostic sink failure, retained diagnostics and original receipt replay. Real-clock gameplay and active-timer SIGTERM shutdown passed.
@@ -138,7 +138,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** OPS / OPEN. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Deployment; bootstrap/Phase 4. **Target:** before public deployment.
-- **Evidence:** [Compose](../docker-compose.yml); [environment example](../.env.example); [README Docker workflow](../README.md).
+- **Evidence:** [Compose](../docker-compose.yml); [environment example](../backend/.env.example); [README Docker workflow](../README.md).
 - **Concern:** Compose exposes loopback ports with local example credentials; no production TLS termination/session deployment contract is provided.
 - **Policy / status:** Current workflow is local development; database URLs are explicit and secrets must stay out of logs/Git.
 - **Impact:** Copying development settings into public deployment would expose unsuitable credentials or transport configuration.
@@ -151,7 +151,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** OPS / OPEN. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** HTTP/operations; bootstrap. **Target:** before public deployment.
-- **Evidence:** [server](../src/transport/server.ts); [main](../src/main.ts); [README](../README.md).
+- **Evidence:** [server](../backend/src/transport/server.ts); [main](../backend/src/main.ts); [README](../README.md).
 - **Concern:** /health always reports process liveness; database is checked at startup only.
 - **Policy / status:** Liveness semantics are documented; readiness semantics and alerting are not established.
 - **Impact:** A healthy response cannot prove ongoing database availability or Match progression.
@@ -166,9 +166,9 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** RISK / RESOLVED. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Authentication; Slice 1/2. **Target:** before public deployment.
-- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [authenticatePlayer](../src/application/authenticate-player.ts); [identity tests](../tests/player-identity.test.ts).
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../backend/tests/authentication.test.ts); [session tests](../backend/tests/sessions.test.ts); [authenticatePlayer](../backend/src/application/authenticate-player.ts); [identity tests](../backend/tests/player-identity.test.ts).
 - **Concern (historical baseline before Slice 2):** Missing credentials return invalid_credentials before Argon2 verification; wrong passwords perform verification.
-- **Policy / status:** Slice 2 adds compatible-cost dummy Argon2id verification for unknown usernames and generic 401 responses. tests/login.test.ts and tests/authentication.test.ts verify the path and response equivalence; no perfect timing-equality guarantee is claimed.
+- **Policy / status:** Slice 2 adds compatible-cost dummy Argon2id verification for unknown usernames and generic 401 responses. backend/tests/login.test.ts and backend/tests/authentication.test.ts verify the path and response equivalence; no perfect timing-equality guarantee is claimed.
 - **Impact:** A public login endpoint could allow statistical username enumeration. No public login exists yet.
 - **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** DEC-004, DEF-001.
@@ -179,7 +179,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** RISK / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Authentication/transport; Slice 2. **Target:** before public deployment.
-- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [System §17](system-design.md#17-security-and-fairness); [server](../src/transport/server.ts); [authentication](../src/application/authenticate-player.ts).
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../backend/tests/authentication.test.ts); [session tests](../backend/tests/sessions.test.ts); [System §17](system-design.md#17-security-and-fairness); [server](../backend/src/transport/server.ts); [authentication](../backend/src/application/authenticate-player.ts).
 - **Concern (historical baseline before Slice 2):** No login route, login-specific bounds, throttling, or credential-stuffing controls are implemented.
 - **Policy / status:** Slice 2 implements canonical failure/IP windows, fail-fast concurrency limits, bounded keys and cleanup. Deterministic service/HTTP tests cover boundary, expiry, outage and saturation behavior. Distributed attackers and production tuning remain hardening concerns.
 - **Impact:** Public password verification without controls permits guessing and CPU/memory abuse.
@@ -192,7 +192,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** RISK / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Gateway/Presenter; Phase 4. **Target:** before public deployment.
-- **Evidence:** [LLD §§4.8,5.5](low-level-design.md#48-client-presenter--projection); [Engine](../src/domain/match-engine.ts); [boundary notes](../src/README.md).
+- **Evidence:** [LLD §§4.8,5.5](low-level-design.md#48-client-presenter--projection); [Engine](../backend/src/domain/match-engine.ts); [boundary notes](../backend/src/README.md).
 - **Concern:** Internal outcomes include answer keys, private submissions and bigint results, which must never be serialized directly.
 - **Policy / status:** Slice 4 adds explicit QUESTION_OPEN, REVEAL and FINISHED allowlists alongside the WAITING Presenter. Viewer-only submissions/results are built separately; exact score units use decimal strings and final standings come from immutable MatchResult. No raw history or persistence claim is exposed.
 - **Verification:** Two-client polling/WebSocket and real PostgreSQL tests cover all ten per-question reveals, distinct viewer results, future-answer secrecy, trusted names and terminal fields; stale enrichment, revocation and expiry tests enforce final delivery authorization.
@@ -206,7 +206,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** RISK / OPEN. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Runtime and development dependencies; Slice 2 verification. **Target:** before public deployment.
-- **Evidence:** Fresh `npm audit --json`, `npm audit --omit=dev --json` and `npm ls release-it undici fastify fast-uri --all` after the focused production and release-tooling patches; [lockfile](../package-lock.json).
+- **Evidence:** Fresh `npm audit --json`, `npm audit --omit=dev --json` and `npm ls release-it undici fastify fast-uri --all` after the focused production and release-tooling patches; [lockfile](../backend/package-lock.json).
 - **Concern:** The initial Slice 2 audit flagged 15 entries (1 low, 13 moderate, 1 high); the production patch reduced this to 13 development entries. After the release-tooling patch, **11 Moderate development-only entries remain**, all from the minimatch/lint-tool dependency chain. No High findings remain, and the production audit still reports **zero vulnerabilities**.
 - **Policy / status:** The production patch updated Fastify 5.12.5 → 5.12.6, fast-uri 4.2.1 → 4.2.3 and nested Ajv fast-uri 3.1.8 → 3.1.9. The subsequent release-tooling patch pins release-it 21.1.2 and resolves undici 7.30.1 through normal npm resolution; its incremental lockfile changes only those two package records and the root release-it pin. Production records remain intact, without a direct fast-uri dependency or new overrides. ESLint, TypeScript-ESLint and minimatch remain unchanged; this record stays OPEN. tldts 7.4.19 was not flagged.
 - **Verification:** Full suite with disposable PostgreSQL: **147 passed, 0 failed, 0 skipped**; seven targeted S2-01 encoded-route tests passed. Release/changelog verification: **21 passed**, including nine release lifecycle tests, using disposable local Git repositories with networking disabled; no remote GitLab access or actual-repository releases. Typecheck/build and scoped lint/format checks passed. Authenticated smoke passed HTTP health, Socket.IO polling/WebSocket, real PostgreSQL encoded login/profile/logout and revocation; backend SIGTERM shutdown exited 0. No source or migration changes. The five manual-script lint errors and six formatting failures remain TEST-005.
@@ -229,7 +229,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** RISK / RESOLVED. **Severity / priority:** MEDIUM / P2 (independent audit recommendation).
 - **Component / phase:** Lobby Gateway publication; Phase 4 Slice 3. **Target:** before public deployment.
-- **Evidence:** [publication guards](../src/transport/lobby-gateway.ts); six A3-01 regressions in [lobby tests](../tests/lobby.test.ts).
+- **Evidence:** [publication guards](../backend/src/transport/lobby-gateway.ts); six A3-01 regressions in [lobby tests](../backend/tests/lobby.test.ts).
 - **Concern:** Cached command ACKs triggered profile lookups before delivered-version checks. The independent audit observed 40 pending lookups from 20 cached Create retries in a two-player Match; no duplicate mutation or unauthorized delivery was demonstrated.
 - **Remediation:** Check connected subscriptions, current membership and delivered versions before enrichment. A local latest-version marker coalesces equivalent in-flight requests per Match; superseded work cannot clear a newer marker. Completion/failure removes the marker, permitting a later valid event to retry incomplete delivery. Final session/membership/version checks and historical ACKs remain unchanged; close clears bookkeeping and suppresses pending delivery.
 - **Verification:** Three regressions failed before remediation (80 versus 0, 82 versus 2 and 21 versus 1 lookups), then passed. Six focused regressions cover retries, coalescing, failed-enrichment recovery, superseded work, disconnect and closure. Full suite with disposable PostgreSQL: **169 passed, 0 failed, 0 skipped**; lobby suite: **21 passed, 0 failed, 0 skipped**; S2-01 security regressions: **7 passed, 0 failed, 0 skipped**. Typecheck/build and scoped lint/format passed.
@@ -245,7 +245,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEBT / OPEN. **Severity / priority:** LOW / UNDECIDED.
 - **Component / phase:** Documentation; bootstrap through Slice 1. **Target:** later hardening.
-- **Evidence:** [AGENTS Scope/Structure](../AGENTS.md); [boundary notes](../src/README.md); [HLD §19](HLD_Component_Diagram.md#19-dependency-direction).
+- **Evidence:** [AGENTS Scope/Structure](../AGENTS.md); [boundary notes](../backend/src/README.md); [HLD §19](HLD_Component_Diagram.md#19-dependency-direction).
 - **Concern:** AGENTS still says no gameplay/authentication/schema; some boundary descriptions refer to earlier phases and NestJS remains in complementary docs.
 - **Policy / status:** System §20 and approved stack use Fastify; current code supplies gameplay and identity.
 - **Impact:** Future contributors may underestimate existing behavior or choose obsolete terminology.
@@ -258,7 +258,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEBT / OPEN. **Severity / priority:** LOW / UNDECIDED.
 - **Component / phase:** Ranking documentation; Phase 2C. **Target:** current demo.
-- **Evidence:** [System §13](system-design.md#13-scoring-and-ranking); [boundary notes](../src/README.md); [completion tests](../tests/match-completion.test.ts).
+- **Evidence:** [System §13](system-design.md#13-scoring-and-ranking); [boundary notes](../backend/src/README.md); [completion tests](../backend/tests/match-completion.test.ts).
 - **Concern:** Code/tests and boundary notes specify competition ranking (1,1,3); baseline specifies shared ranks but not rank gaps.
 - **Policy / status:** Repository notes attribute competition ranking to explicit M1 clarification; implementation preserves exact ties.
 - **Impact:** A later implementation could choose dense ranking from baseline wording alone.
@@ -273,7 +273,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEC / RESOLVED. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Authentication; Slice 2. **Target:** before public deployment.
-- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [LLD §§4.9,5.7,10.1](low-level-design.md#57-http-api); [DFD §1](Data_Flow_Diagram.md#1-authentication-flow).
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../backend/tests/authentication.test.ts); [session tests](../backend/tests/sessions.test.ts); [LLD §§4.9,5.7,10.1](low-level-design.md#57-http-api); [DFD §1](Data_Flow_Diagram.md#1-authentication-flow).
 - **Concern (historical baseline before Slice 2):** Password verification establishes no HTTP or realtime session.
 - **Policy / status:** Approved Slice 2: process-local opaque server-side sessions, SHA-256 token digests and 256-bit random tokens. Restart loses sessions; durable Player identity survives.
 - **Impact:** Determines revocation, restart behavior, schema and runtime dependencies.
@@ -286,7 +286,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEC / RESOLVED. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Authentication/socket lifecycle; Slice 2. **Target:** before public deployment.
-- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [LLD §§5.7,10.1](low-level-design.md#101-open-questions).
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../backend/tests/authentication.test.ts); [session tests](../backend/tests/sessions.test.ts); [LLD §§5.7,10.1](low-level-design.md#101-open-questions).
 - **Concern (historical baseline before Slice 2):** No expiration durations, rotation, logout scope, concurrent-session rules or existing-socket revocation semantics are frozen.
 - **Policy / status:** Approved Slice 2: 30-minute idle, 12-hour absolute; intentional authenticated actions alone refresh idle. Independent sessions coexist; logout revokes current session and closes its sockets. Synchronous Gateway admission is implemented under DEF-002.
 - **Impact:** Long-lived sockets need explicit authorization validity; logout must have defined scope.
@@ -299,7 +299,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEC / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** HTTP/Socket.IO; Slice 2. **Target:** before public deployment.
-- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [LLD §§5.2,5.7](low-level-design.md#52-realtime-command-envelope); [server](../src/transport/server.ts); [System §17](system-design.md#17-security-and-fairness).
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../backend/tests/authentication.test.ts); [session tests](../backend/tests/sessions.test.ts); [LLD §§5.2,5.7](low-level-design.md#52-realtime-command-envelope); [server](../backend/src/transport/server.ts); [System §17](system-design.md#17-security-and-fairness).
 - **Concern (historical baseline before Slice 2):** Transport mechanism, route DTOs, browser origins, cookie attributes and handshake protection remain unspecified.
 - **Policy / status:** Approved Slice 2: HTTPS __Host cookie, strict configured Origin/JSON demo CSRF posture, same-site credentialed CORS, explicit trusted proxies, actual-loopback development exception; polling and WebSocket authenticate server-session identity. Approved safe-GET clarification: /auth/profile allows absent Origin without Referer; present null/disallowed origins reject. Sessions, no idle refresh and no-store remain mandatory. POST login/logout and Socket.IO keep mandatory Origin. No frontend topology is selected.
 - **Impact:** Unsafe browser defaults could enable credential theft, request forgery or unauthorized socket access.
@@ -312,7 +312,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEC / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Authentication security; Slice 2. **Target:** before public deployment.
-- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [System §17](system-design.md#17-security-and-fairness); [LLD §8](low-level-design.md#8-error--validation-model); [authentication](../src/application/authenticate-player.ts).
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../backend/tests/authentication.test.ts); [session tests](../backend/tests/sessions.test.ts); [System §17](system-design.md#17-security-and-fairness); [LLD §8](low-level-design.md#8-error--validation-model); [authentication](../backend/src/application/authenticate-player.ts).
 - **Concern (historical baseline before Slice 2):** Exact input sizes, Unicode handling, rate keys/windows and timing strategy are not frozen.
 - **Policy / status:** Approved Slice 2: 4 KiB JSON, exact fields, ASCII canonical username 1–128 bytes, unchanged password 1–1024 UTF-8 bytes; 60 attempts/IP and 10 credential failures/name per 15 minutes, at most four concurrent verifications and no queue. This does not decide password-creation policy.
 - **Impact:** Policy affects abuse resistance, resource use and legitimate clients.
@@ -325,7 +325,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEC / OPEN. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Provisioning; Slice 1/future authentication. **Target:** undecided.
-- **Evidence:** [Database §4.2](database-design.md#42-password_credential); [provisionPlayer](../src/application/authenticate-player.ts); [hashing](../src/application/password.ts).
+- **Evidence:** [Database §4.2](database-design.md#42-password_credential); [provisionPlayer](../backend/src/application/authenticate-player.ts); [hashing](../backend/src/application/password.ts).
 - **Concern:** Argon2id is implemented; password length/complexity and account lifecycle are not specified.
 - **Policy / status:** Internal/test provisioning only; no registration/reset.
 - **Impact:** Future provisioning rules must agree with accepted login input bounds.
@@ -338,7 +338,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEC / OPEN. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Lobby/gameplay; Phase 1 onward. **Target:** future design.
-- **Evidence:** [System §5](system-design.md#5-important-open-questions); [LLD §10.2](low-level-design.md#102-explicitly-deferred); [lobby tests](../tests/match-engine.test.ts).
+- **Evidence:** [System §5](system-design.md#5-important-open-questions); [LLD §10.2](low-level-design.md#102-explicitly-deferred); [lobby tests](../backend/tests/match-engine.test.ts).
 - **Concern:** Host leave returns unsupported; active disconnect/reconnect/leave policy is unresolved.
 - **Policy / status:** No automatic Host transfer, grace period or replacement bot.
 - **Impact:** Transport disconnects, including auth expiry, cannot silently authorize gameplay membership changes.
@@ -444,7 +444,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** TEST / OPEN. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Test infrastructure; bootstrap/Slice 1. **Target:** current demo.
-- **Evidence:** [identity tests](../tests/player-identity.test.ts); [Postgres tests](../tests/postgres.test.ts); [README verification](../README.md).
+- **Evidence:** [identity tests](../backend/tests/player-identity.test.ts); [Postgres tests](../backend/tests/postgres.test.ts); [README verification](../README.md).
 - **Concern:** Real database tests skip without TEST_DATABASE_URL; fixtures verify a *_test database before identity writes.
 - **Policy / status:** Source tests are available; this registry task did not execute them and has no durable CI result archive.
 - **Impact:** A green default suite alone does not prove migration/authentication integration.
@@ -457,7 +457,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** TEST / OPEN. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Migration runner; Slice 1. **Target:** before public deployment.
-- **Evidence:** [runner](../src/persistence/migrations.ts); [identity tests](../tests/player-identity.test.ts).
+- **Evidence:** [runner](../backend/src/persistence/migrations.ts); [identity tests](../backend/tests/player-identity.test.ts).
 - **Concern:** Runner uses one transaction, advisory lock and checksums. Tests repeat normal migration execution and test provisioning rollback; Slice 2 now tests migration 002 collision/invalid-value rollback, ledger integrity and concurrent runs; generalized failure injection after arbitrary migration writes remains untested.
 - **Policy / status:** Migration 002 safety and concurrency now have real PostgreSQL coverage. This record retains only broader migration-failure injection coverage beyond preflight failures.
 - **Impact:** Migration regressions could escape normal-path tests.
@@ -470,7 +470,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** TEST / RESOLVED. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Dependencies/release; bootstrap onward. **Target:** before public deployment.
-- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [README release tooling](../README.md); [manifest](../package.json); [lockfile](../package-lock.json).
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../backend/tests/authentication.test.ts); [session tests](../backend/tests/sessions.test.ts); [README release tooling](../README.md); [manifest](../backend/package.json); [lockfile](../backend/package-lock.json).
 - **Concern (historical baseline before Slice 2):** README records a targeted basic-ftp override; manifest pins that override to 6.2.3. No saved npm-audit report or current advisory query was available in this review.
 - **Policy / status:** An npm audit --json run during Slice 2 confirmed 15 flagged dependency entries (1 low, 13 moderate, 1 high); exact installed roots and advisory links are retained in RISK-004. This closes audit availability only, not remediation.
 - **Impact:** Exposure and remediation completeness cannot be quantified from override presence alone.
@@ -483,7 +483,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** TEST / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Integration; Phase 4. **Target:** current demo.
-- **Evidence:** [LLD §9.9](low-level-design.md#99-end-to-end-critical-path); [History tests](../tests/history.test.ts); [gameplay-to-History test](../tests/lobby.test.ts); [main](../src/main.ts).
+- **Evidence:** [LLD §9.9](low-level-design.md#99-end-to-end-critical-path); [History tests](../backend/tests/history.test.ts); [gameplay-to-History test](../backend/tests/lobby.test.ts); [main](../backend/src/main.ts).
 - **Concern (historical):** Slice 5 stopped at database readback; authenticated History retrieval was unverified.
 - **Policy / status:** Slice 6 extends authenticated two-client ten-question PostgreSQL integration through automatic completion, independent graph readback, History List/Detail and nonparticipant denial. Dedicated tests cover paging, viewer-only SQL, current names, corrupt graphs, non-refreshing session rechecks, Origin and encoded-route guards.
 - **Verification:** Full suite with disposable PostgreSQL: **235 passed, 0 failed, 0 skipped** (baseline 214). History/lobby suites: **57 passed**. Real-clock two-client polling/WebSocket gameplay completed ten question/reveal cycles, COMMIT, fresh-connection readback, encoded History List and viewer-safe Detail for both participants; nonparticipant List was empty and Detail matched absent-ID 404. Authenticated smoke and active-client SIGTERM shutdown passed (exit 0). SQL BIGINT stress is explicitly not a legal M1 scoring fixture.
@@ -497,8 +497,8 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** TEST / OPEN. **Severity / priority:** LOW / UNDECIDED.
 - **Component / phase:** Developer verification; Phase 3 manual scripts/Slice 2. **Target:** later hardening.
-- **Evidence:** [manual deadline](../manual-deadline-test.ts), [scheduler failure](../manual-scheduler-failure-test.ts), [shutdown](../manual-shutdown-test.ts); full-checkout npm run check executed in mounted Docker workspace.
-- **Concern:** Five pre-existing unused underscore-prefixed parameter lint errors stop full-checkout check. Official tools image does not copy these root manual scripts, so its full check passes.
+- **Evidence:** [manual deadline](../backend/manual-deadline-test.ts), [scheduler failure](../backend/manual-scheduler-failure-test.ts), [shutdown](../backend/manual-shutdown-test.ts); full-checkout npm run check executed in mounted Docker workspace.
+- **Concern:** Five pre-existing unused underscore-prefixed parameter lint errors stop full-checkout check. Official tools image does not copy these backend-root manual scripts, so its full check passes.
 - **Policy / status:** Manual scripts and lint rules left unchanged to preserve slice scope. This is distinct from new authentication verification.
 - **Impact:** Native/full-checkout check and official image check cover different files.
 - **Next action:** Approve focused manual-script lint cleanup or an explicit verification-scope rule; do not claim the full checkout passed.
@@ -512,7 +512,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEF / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Transport/authentication; Slice 2. **Target:** current demo.
-- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../tests/authentication.test.ts); [session tests](../tests/sessions.test.ts); [LLD §§4.2,5.7](low-level-design.md#57-http-api); [server](../src/transport/server.ts); [main](../src/main.ts).
+- **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../backend/tests/authentication.test.ts); [session tests](../backend/tests/sessions.test.ts); [LLD §§4.2,5.7](low-level-design.md#57-http-api); [server](../backend/src/transport/server.ts); [main](../backend/src/main.ts).
 - **Concern (historical baseline before Slice 2):** Only health and unauthenticated connectivity are exposed; internal verification is not wired into transports.
 - **Policy / status:** Slice 2 wires the PostgreSQL verifier and SessionStore into main, HTTP routes and polling/WebSocket authentication. Tests exercise real listeners, origins, logout/expiry and session isolation. Gameplay Gateway commands remain DEF-002, not completed by handshake authentication.
 - **Impact:** Current server is not an authenticated playable application.
@@ -525,7 +525,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEF / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Gateway/Presenter/Provider; Phase 4. **Target:** current demo.
-- **Evidence:** [HLD §§3,10–11](HLD_Component_Diagram.md#3-realtime-gateway); [main](../src/main.ts); [boundary notes](../src/README.md).
+- **Evidence:** [HLD §§3,10–11](HLD_Component_Diagram.md#3-realtime-gateway); [main](../backend/src/main.ts); [boundary notes](../backend/src/README.md).
 - **Concern:** Prior integration stopped at WAITING, despite complete pure Engine gameplay.
 - **Policy / status:** Slice 4 connects trusted Start/Answer, fixed server content, Engine-owned running scoreboards, viewer-safe active/FINISHED MatchSnapshot and timer-driven post-commit publication. Existing subscriptions, synchronous SessionStore.act admission, FIFO, Promise identity and historical ACKs are preserved. Live FINISHED is explicitly not durable History.
 - **Verification:** Slice 4 full suite with disposable PostgreSQL: **188 passed, 0 failed, 0 skipped** (Slice 3 baseline: 169). Targeted domain/gameplay tests: **37 passed**; S2-01/A3-01 regressions: **13 passed**; all zero failed/skipped. Typecheck/build and scoped lint/format passed. Two real authenticated clients (polling/WebSocket) completed ten real-clock question/reveal cycles, then live FINISHED. A second Match shut down with an active question timer and connected users, exit 0. Historical lint/format debt remains TEST-005.
@@ -539,7 +539,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 - **Category / status:** DEF / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Persistence/History; Phase 4. **Target:** current demo.
-- **Evidence:** [Database §§9–11](database-design.md#9-completed-match-persistence); [migrations](../migrations/001_player_identity.sql); [LLD §6.9](low-level-design.md#69-persist-completed-match).
+- **Evidence:** [Database §§9–11](database-design.md#9-completed-match-persistence); [migrations](../backend/migrations/001_player_identity.sql); [LLD §6.9](low-level-design.md#69-persist-completed-match).
 - **Concern (historical):** Completed persistence and authorized retrieval were missing; Slice 5 implemented storage.
 - **Policy / status:** Migration 003 stores the five-table graph with UUIDs, millisecond timestamps, bigint scores, composite membership FKs and a deferred correct-choice FK. The repository commits atomically or verifies complete durable equivalence. Application ownership captures FINISHED before Registry cleanup, tracks one active attempt per Match, and exposes controlled in-process retry with pending/succeeded/failed/unconfirmed outcomes. Gateway observer/public wire contracts remain unchanged.
 - **Verification:** Full suite with disposable PostgreSQL: **214 passed, 0 failed, 0 skipped** (baseline 198). Tests cover real concurrent saves/conflicts, atomic rollback/visibility, lost COMMIT response, explicit retry, live FINISHED isolation from write failure, FIFO/shutdown capture and the existing 10-second watchdog. Real-clock two-client gameplay produced ten reveals, automatic commit and fresh-connection readback of 10 questions/40 choices/20 answers, exact standings and timestamps; active-client SIGTERM exited 0. Exact schema BIGINT stress beyond JS safe integers was tested inside a rolled-back SQL transaction, not misrepresented as a legal M1 award.
@@ -578,7 +578,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 LIM-001 permits post-commit scheduling failure to stall progress, preserving authoritative state and the accepted receipt. LIM-002 accepts active-process loss. LIM-003 retains aggregates/retry outcomes until shutdown, with memory growth as a consequence. These remain accepted, not silently closed. DEF-004/005 record scope exclusions rather than defects.
 
-Stale/cancelled callbacks are **design-compliant informational behavior**, not a BUG: they may consume receipt sequence numbers, but Engine validation prevents mutation (LLD §4.5; System §16; [manual stale timer script](../manual-stale-timer-test.ts); [Coordinator tests](../tests/match-coordinator.test.ts)). Cancellation remains an optimization. No ownership guard is required solely to avoid this overhead.
+Stale/cancelled callbacks are **design-compliant informational behavior**, not a BUG: they may consume receipt sequence numbers, but Engine validation prevents mutation (LLD §4.5; System §16; [manual stale timer script](../backend/manual-stale-timer-test.ts); [Coordinator tests](../backend/tests/match-coordinator.test.ts)). Cancellation remains an optimization. No ownership guard is required solely to avoid this overhead.
 
 ## 8. Deferred design decisions and future recovery considerations
 
@@ -596,7 +596,7 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 
 - **Category / status:** BUG / RESOLVED. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Configuration; bootstrap. **Target:** current demo.
-- **Evidence:** Git 5390ca6; [config](../src/config.ts); [Postgres regressions](../tests/postgres.test.ts).
+- **Evidence:** Git 5390ca6; [config](../backend/src/config.ts); [Postgres regressions](../backend/tests/postgres.test.ts).
 - **Concern:** Original bootstrap passed a connection string into pg while ambient PG settings could influence configuration.
 - **Policy / status:** 5390ca6 introduced explicit decoded required connection fields and poisoned-PG environment regressions, including reserved credential characters.
 - **Impact:** Previously distributed settings could connect incorrectly; current tests protect the boundary.
@@ -609,7 +609,7 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 
 - **Category / status:** BUG / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** HTTP/realtime/database; bootstrap. **Target:** current demo.
-- **Evidence:** Git 5390ca6; [lifecycle regressions](../tests/lifecycle.test.ts); [server](../src/transport/server.ts); [main](../src/main.ts).
+- **Evidence:** Git 5390ca6; [lifecycle regressions](../backend/tests/lifecycle.test.ts); [server](../backend/src/transport/server.ts); [main](../backend/src/main.ts).
 - **Concern:** Earlier cleanup coupled Socket.IO and Fastify close operations and had separate startup/failure paths.
 - **Policy / status:** 5390ca6 establishes one cleanup owner/order, signal-aware startup and nonzero failure status; tests cover listener and Engine.IO cleanup counts.
 - **Impact:** Duplicate closes, incomplete cleanup or misleading process results were possible in earlier bootstrap.
@@ -622,7 +622,7 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 
 - **Category / status:** BUG / RESOLVED. **Severity / priority:** MEDIUM / UNDECIDED.
 - **Component / phase:** Engine; Phase 1/2A. **Target:** current demo.
-- **Evidence:** Git 3190d04; [lobby overflow regression](../tests/match-engine.test.ts); [nextVersion](../src/domain/match-engine.ts).
+- **Evidence:** Git 3190d04; [lobby overflow regression](../backend/tests/match-engine.test.ts); [nextVersion](../backend/src/domain/match-engine.ts).
 - **Concern:** Phase 1 membership used version + 1 without a safe-integer advancement guard.
 - **Policy / status:** Phase 2A adds nextVersion and regression; later transitions also have overflow tests.
 - **Impact:** Unsafe versions would violate mutation/version ordering at the numeric boundary.
@@ -635,7 +635,7 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 
 - **Category / status:** BUG / RESOLVED. **Severity / priority:** HIGH / P0 (approved focused remediation).
 - **Component / phase:** HTTP authentication; Phase 4 Slice 2. **Target:** current demo, before public deployment.
-- **Evidence:** [route enforcement](../src/transport/authentication.ts); [encoded-path regressions](../tests/authentication.test.ts); approved [LLD §5.7 contract](low-level-design.md#57-http-api).
+- **Evidence:** [route enforcement](../backend/src/transport/authentication.ts); [encoded-path regressions](../backend/tests/authentication.test.ts); approved [LLD §5.7 contract](low-level-design.md#57-http-api).
 - **Concern:** Fastify routed `/%61uth/login`, logout and profile aliases to authentication handlers, while a raw `/auth/` prefix check skipped transport/Origin/JSON enforcement, login IP accounting and no-store headers. Endpoint encodings also bypassed raw-path-specific decisions. Credential verification and session requirements were not bypassed.
 - **Remediation:** Attach the shared `onRequest` hook directly to login, logout, profile and preflight routes. Fastify routing precedes this hook; registered `routeOptions.url` supplies identity for login accounting and the safe read-only profile exception. No custom URL decoding, session-policy change or Socket.IO change.
 - **Verification:** Seven targeted tests failed against the vulnerable implementation and passed after remediation. Coverage includes normal paths, encoded prefixes/endpoints, mixed encodings with query strings, Origin cases, shared 60-attempt IP window, transport rejection before parsing, JSON/body bounds, preflight, no-store and profile non-refresh behavior, plus a real HTTP listener. Full suite: **147 passed, 0 failed, 0 skipped**, including disposable PostgreSQL migration/identity tests and existing Socket.IO/session tests. Typecheck, temporary-output build and scoped source/test/script lint/format checks passed. Existing authenticated smoke passed HTTP health and both Socket.IO transports; real backend SIGTERM shutdown exited 0.
@@ -649,7 +649,7 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 
 - **Category / status:** BUG / RESOLVED. **Severity / priority:** MEDIUM / P1 (independent audit recommendation).
 - **Component / phase:** Coordinator notification/reporting callbacks; Phase 4 Slice 4. **Target:** current demo, before extending callback integration.
-- **Evidence:** [Coordinator callback containment](../src/application/match-coordinator.ts); A4-01 child-process regressions in [Coordinator tests](../tests/match-coordinator.test.ts).
+- **Evidence:** [Coordinator callback containment](../backend/src/application/match-coordinator.ts); A4-01 child-process regressions in [Coordinator tests](../backend/tests/match-coordinator.test.ts).
 - **Concern:** Callback invocation caught synchronous throws but ignored returned Promise rejections. Async notification, notification-error reporter and timer-diagnostic callbacks could terminate Node after an accepted receipt. Current Gateway/runtime registrations were synchronous; no normal client-triggered path was established.
 - **Remediation:** A local helper invokes callbacks immediately and observes returned Promise/thenable rejections without awaiting them. A functioning notification-error reporter still runs; its own synchronous/async failure is contained without recursive reporting. Timer failures remain retained before their sink is invoked. Core Engine/Registry errors and original command Promises are untouched.
 - **Verification:** Before remediation, three async child scenarios exited 1 after accepted receipts; three thenable scenarios failed because rejection/diagnostic handling never ran. Afterward all nine sync/async/thenable children exited naturally 0 under strict unhandled-rejection handling. A tenth test confirms indefinitely pending listeners do not block FIFO, replay or shutdown. Full suite with disposable PostgreSQL: **198 passed, 0 failed, 0 skipped** (baseline 188); Coordinator suite: **33 passed**; S2-01/A3-01 regressions: **13 passed**, all zero failed/skipped. Typecheck/build and scoped lint/format passed. Authenticated HTTP/polling/WebSocket smoke passed Start/Answer/replay and automatic real-clock REVEAL; SIGTERM with active question/reveal timers and connected users exited 0.
@@ -663,7 +663,7 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 
 - **Category / status:** BUG / RESOLVED. **Severity / priority:** LOW / P2.
 - **Component / phase:** HTTP router early-error boundary; Phase 4 Slice 6. **Target:** current demo.
-- **Evidence:** [router-level handler](../src/transport/server.ts); A6-01 real-listener regression in [History tests](../tests/history.test.ts); [LLD §5.7](low-level-design.md#approved-history-http-contract-phase-4-slice-6).
+- **Evidence:** [router-level handler](../backend/src/transport/server.ts); A6-01 real-listener regression in [History tests](../backend/tests/history.test.ts); [LLD §5.7](low-level-design.md#approved-history-http-contract-phase-4-slice-6).
 - **Concern:** Malformed percent/UTF-8 path components failed before route selection, returning Fastify's FST_ERR_BAD_URL envelope, echoed malformed input and no Cache-Control. No History data or authentication bypass was demonstrated.
 - **Remediation:** Supported global routerOptions.onBadUrl rejects decoding failures with only 400 `{ code: 'INVALID_REQUEST' }`, JSON content type and no-store. It neither examines/decodes input nor forwards to a handler. Route-bound authentication/Origin checks, ordinary HTTP error mapping and session behavior remain unchanged.
 - **Verification:** The real-listener regression failed before the fix (0 passed, 1 failed), then passed for all four malformed paths under missing/valid sessions and disallowed/null Origins. It verifies zero History reads, no cookies, no raw/internal diagnostics and unchanged valid encoded History/health behavior; an unrelated thrown error still maps to 500 INTERNAL_ERROR.
@@ -677,14 +677,14 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 | Stage | Available history and evidence | Interpretation |
 |---|---|---|
 | Foundation/bootstrap | 4743592, 6f5e3d6, 5390ca6; configuration/transport/lifecycle tests | Historical fixes BUG-001/002; operational readiness gaps retained separately. |
-| Release tooling | 8b74229; [release tests](../tests/release.test.ts), [archive tests](../tests/archive-changelog.test.ts), README | Tests exercise temporary Git repositories, plugin lifecycle/staging, idempotent archival and conflicts; no historical release defect inferred. |
-| Phase 1 | 72b0daf; [lobby tests](../tests/match-engine.test.ts) | Lobby behavior protected; overflow subsequently fixed (BUG-003). |
-| Phase 2A | 3190d04; [question lifecycle tests](../tests/question-lifecycle.test.ts) | Caller-owned timing, safe versions, exact deadline transitions and immutability covered in source tests. |
-| Phase 2B | 34d91df; [answer tests](../tests/answer-submission.test.ts) | Exclusive 10,000ms boundary; accepted changes replace timing; same-choice no-op; three attempts; exact bigint units. These are not open scoring bugs. |
-| Phase 2C | 5eee1ae; [completion tests](../tests/match-completion.test.ts) | Ten ordered questions, immutable result, terminal behavior and competition ties covered. Documentation specificity tracked in DEBT-002. |
-| Phase 3 | fcaa599, 8e95f0a, ee2f5ce; [Coordinator tests](../tests/match-coordinator.test.ts), [clock tests](../tests/match-time.test.ts) | FIFO, original receipt replay, 9,999ms admission, late rejection, exceptions, shutdown drainage and timers covered; do not reopen merely because timing was difficult. |
-| Manual runtime review | [create](../manual-create-test.ts), [deadline](../manual-deadline-test.ts), [timer](../manual-timer-test.ts), [shutdown](../manual-shutdown-test.ts), [stale callback](../manual-stale-timer-test.ts), [scheduler failure](../manual-scheduler-failure-test.ts) | Executable assertions are evidence of intended checks, not archived execution logs. No rerun or pass claim in this task. |
-| Slice 1 | 1611d46; [migration](../migrations/001_player_identity.sql), [identity tests](../tests/player-identity.test.ts) | Player UUID, credential separation, Argon2id and explicit migrations implemented; conditional PostgreSQL coverage noted. |
+| Release tooling | 8b74229; [release tests](../backend/tests/release.test.ts), [archive tests](../backend/tests/archive-changelog.test.ts), README | Tests exercise temporary Git repositories, plugin lifecycle/staging, idempotent archival and conflicts; no historical release defect inferred. |
+| Phase 1 | 72b0daf; [lobby tests](../backend/tests/match-engine.test.ts) | Lobby behavior protected; overflow subsequently fixed (BUG-003). |
+| Phase 2A | 3190d04; [question lifecycle tests](../backend/tests/question-lifecycle.test.ts) | Caller-owned timing, safe versions, exact deadline transitions and immutability covered in source tests. |
+| Phase 2B | 34d91df; [answer tests](../backend/tests/answer-submission.test.ts) | Exclusive 10,000ms boundary; accepted changes replace timing; same-choice no-op; three attempts; exact bigint units. These are not open scoring bugs. |
+| Phase 2C | 5eee1ae; [completion tests](../backend/tests/match-completion.test.ts) | Ten ordered questions, immutable result, terminal behavior and competition ties covered. Documentation specificity tracked in DEBT-002. |
+| Phase 3 | fcaa599, 8e95f0a, ee2f5ce; [Coordinator tests](../backend/tests/match-coordinator.test.ts), [clock tests](../backend/tests/match-time.test.ts) | FIFO, original receipt replay, 9,999ms admission, late rejection, exceptions, shutdown drainage and timers covered; do not reopen merely because timing was difficult. |
+| Manual runtime review | [create](../backend/manual-create-test.ts), [deadline](../backend/manual-deadline-test.ts), [timer](../backend/manual-timer-test.ts), [shutdown](../backend/manual-shutdown-test.ts), [stale callback](../backend/manual-stale-timer-test.ts), [scheduler failure](../backend/manual-scheduler-failure-test.ts) | Executable assertions are evidence of intended checks, not archived execution logs. No rerun or pass claim in this task. |
+| Slice 1 | 1611d46; [migration](../backend/migrations/001_player_identity.sql), [identity tests](../backend/tests/player-identity.test.ts) | Player UUID, credential separation, Argon2id and explicit migrations implemented; conditional PostgreSQL coverage noted. |
 | Reconciliation | 0b3fb90; System §16/§20, LLD §4.3/4.5/4.9/8.7/10.1, Database §4/§15 | Scheduler limitation, idempotency retention and UUID/provisioning contracts are now recorded; not all SQL types settled. |
 | Slice 2 discussion | Approved Slice 2 task and reconciled LLD §5.7; authentication/session/migration tests | Session/security decisions now recorded. No gameplay Gateway/rejoin or password-creation policy is implied. |
 
@@ -726,6 +726,29 @@ were verified rather than inferred from installation. Installer audits reported
 ten development-only Moderate findings and zero production findings; RISK-004
 and the five/six manual-script lint/format failures (TEST-005) remain open.
 Accepted gameplay, recovery, retention and A6-02 limitations remain unchanged.
+
+### Monorepo relocation verification
+
+Backend application files and tooling now live in `backend/`; shared designs/API
+contract remain in `docs/`, with Compose and the changelog at repository root.
+All 78 relocated tracked files were initially byte-identical to HEAD; none were
+missing or duplicated at their old paths. Both Compose build contexts now use
+`./backend`. Select `backend/.env` explicitly with `--env-file` from root.
+Release configuration and disposable Git fixtures account for the root changelog
+and archives while package/version files remain backend-local. No dependency,
+application behavior, migration or persistent volume change was required.
+
+Verification used rebuilt development/production images, Node **26.13.0**, npm
+**11.20.0**, Debian Bookworm and disposable PostgreSQL 17 on tmpfs. Clean `npm ci`
+and `npm run check` passed, including **236 passed / 0 failed / 0 skipped** with
+real PostgreSQL integration. Separate HTTP/History/lobby/session tests passed
+**81/0/0**, completion repository/lifecycle **15/0/0**, and named S2-01/A3-01/A4-01/
+A6-01 regressions **27/0/0**. Production native Argon2 hash/verify and the migration
+command passed. The real production-container smoke completed ten questions and
+ten reveals, FINISHED, COMMIT, independent readback, both Players' private History,
+outsider denial, and authenticated polling/WebSocket checks. Existing five lint
+errors/six formatting failures in backend-root manual scripts remain TEST-005;
+development advisories and accepted M1 recovery/retention limitations stay open.
 
 ## 11. Maintenance rules
 

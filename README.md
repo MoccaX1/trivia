@@ -1,12 +1,14 @@
 # Trivia Game M1 backend
 
-Single-process TypeScript backend: Fastify HTTP and Socket.IO share one
-Node.js HTTP server; PostgreSQL supplies local durable storage infrastructure.
-The pure Match Engine and application runtime support the complete ten-question
-lifecycle, serialized commands and authoritative timers. They are not connected
-to transport gameplay handlers yet. Player/Credential persistence and password
-verification and trusted HTTP/Socket.IO sessions exist. History API and frontend
-remain unimplemented.
+Single-process TypeScript backend in `backend/`: authenticated realtime gameplay
+through ten questions and ten reveals, live FINISHED, atomic PostgreSQL completion
+persistence, and participant-authorized HTTP History. `frontend/` is reserved for a
+future standalone Angular application; shared designs and the
+[frontend API contract](docs/api-contract.md) remain in `docs/`.
+
+Run Compose from the repository root. Backend package scripts run inside Docker
+at `/app`, the image's backend application directory. Do not use host Node/npm/nvm
+or run Angular CLI from `backend/`.
 
 ## Design authority
 
@@ -25,21 +27,22 @@ remain authoritative. Open/deferred policies require an approved decision.
 
 - Docker Engine with Docker Compose v2 or newer.
 - Docker images pin Node.js 26.13.0 LTS (Debian Bookworm); tools and production use
-  the same runtime. Native development is optional and requires Node.js >=26.13.0 <27.
-  Verification uses Docker, with isolated dependencies/builds and disposable PostgreSQL.
-- Free local ports 3000 and 5432, or alternatives set in `.env`.
+  the same runtime. All Node/npm commands run in Docker,
+  with isolated dependencies/builds and disposable PostgreSQL.
+- Free local ports 3000 and 5432, or alternatives set in `backend/.env`.
 
-If ports are occupied, change `PORT` and `POSTGRES_PORT` in `.env` and update the
-native `DATABASE_URL` to match before starting.
+If ports are occupied, change `PORT` and `POSTGRES_PORT` in `backend/.env` before starting.
+Every root Compose command below explicitly selects that relocated environment file;
+Compose does not load it automatically from `backend/`.
 
 ## Docker setup
 
 ```sh
-cp .env.example .env
-docker compose up --build --wait
+cp backend/.env.example backend/.env
+docker compose --env-file backend/.env up --build --wait
 curl --fail http://127.0.0.1:3000/health
-docker compose ps
-docker compose logs -f backend
+docker compose --env-file backend/.env ps
+docker compose --env-file backend/.env logs -f backend
 ```
 
 `GET /health` returns `200 {"status":"ok"}`. It reports process liveness, not
@@ -54,8 +57,7 @@ The backend decodes the URL into explicit pool settings and ignores `PG*` connec
 variables. TLS defaults to disabled for local development; `?sslmode=verify-full`
 enables certificate/hostname verification. Other URL query options are rejected.
 
-For native development set `DATABASE_URL` with the published localhost port. For
-Compose set `COMPOSE_DATABASE_URL` with the internal `postgres:5432` address; Compose
+For Compose set `COMPOSE_DATABASE_URL` with the internal `postgres:5432` address; Compose
 passes that complete value to the backend as `DATABASE_URL`. Percent-encode username,
 password, and database **independently**, for example with `encodeURIComponent`.
 A password `p@ss:/?#%$` becomes `p%40ss%3A%2F%3F%23%25%24`. Do not interpolate raw
@@ -65,20 +67,20 @@ so Compose does not interpolate `$` in provisioning passwords.
 `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` provision the database container
 only; they must match the decoded backend URLs. These defaults are local-development
 credentials, not production secrets. Provisioning changes apply only to a newly
-initialized volume; existing credentials are not changed by editing `.env`. Keep
+initialized volume; existing credentials are not changed by editing `backend/.env`. Keep
 URLs out of logs and command output; failure diagnostics report codes, not driver
 messages or stacks that could contain secrets.
 
 ```sh
 # Rebuild after source or dependency changes; no source bind mount is used.
-docker compose up --build --wait
+docker compose --env-file backend/.env up --build --wait
 # Check the running environment using the development/tooling image.
-docker compose --profile tools run --build --rm tools npm run check
-docker compose --profile tools run --build --rm -e SMOKE_URL=http://backend:3000 tools npm run smoke
+docker compose --env-file backend/.env --profile tools run --build --rm tools npm run check
+docker compose --env-file backend/.env --profile tools run --build --rm -e SMOKE_URL=http://backend:3000 tools npm run smoke
 # Gracefully stop (retains containers and PostgreSQL data).
-docker compose stop
+docker compose --env-file backend/.env stop
 # Remove containers/network, retaining the named database volume.
-docker compose down
+docker compose --env-file backend/.env down
 ```
 
 The optional `tools` profile runs checks on demand; it is not another backend
@@ -94,43 +96,40 @@ The backend does not create schema at startup. Apply the versioned migration
 explicitly after PostgreSQL is healthy:
 
 ```sh
-docker compose up -d --wait postgres
-docker compose --profile tools run --build --rm tools npm run migrate
+docker compose --env-file backend/.env up -d --wait postgres
+docker compose --env-file backend/.env --profile tools run --build --rm tools npm run migrate
 ```
 
-For native development, `npm run migrate` uses `DATABASE_URL` from `.env` and
-builds first. Repeating the command is safe: applied SQL is tracked with a checksum;
+The tools image builds before applying migrations. Repeating the command is safe: applied SQL is tracked with a checksum;
 changed or unknown migration versions fail instead of being replayed. The migrations
 create `player` and `password_credential` and enforce canonical usernames. Player IDs are server-generated UUIDs.
 No public registration or provisioning command is available.
 
 PostgreSQL integration tests require a separate database whose name ends in `_test`.
 For the default local Compose credentials, create one once with
-`docker compose exec postgres createdb -U trivia trivia_test` (skip this step if it
-already exists). Set `TEST_DATABASE_URL` in your untracked `.env` to a complete URL
+`docker compose --env-file backend/.env exec postgres createdb -U trivia trivia_test` (skip this step if it
+already exists). Set `TEST_DATABASE_URL` in your untracked `backend/.env` to a complete URL
 using host `postgres` and database `trivia_test`, then run:
 
 ```sh
-docker compose --profile tools run --build --rm tools npm test
+docker compose --env-file backend/.env --profile tools run --build --rm tools npm test
 ```
 
 The tests verify the database name before writing and clean up only their own
-Player fixtures. They apply the migration to the test database. For native tests,
-export a corresponding localhost `TEST_DATABASE_URL` instead. Keep credentials out
+Player fixtures. They apply migrations only to the isolated test database. Keep credentials out
 of committed files and command output.
 
-## Native development
+## Backend tooling inside Docker
+
+All package commands below are backend-local. From the repository root use:
 
 ```sh
-cp .env.example .env
-npm ci
-docker compose up -d --wait postgres
-npm run dev
+docker compose --env-file backend/.env --profile tools run --build --rm tools npm run typecheck
 ```
 
-Node loads `.env` directly, and watch mode restarts on source changes. Avoid running
-the Compose backend on the same port. Environment variables override `.env` values.
-Missing/invalid settings fail startup; the database connection attempt is bounded.
+Images copy `backend/` into `/app`, install clean dependencies and keep builds in
+the container. Rebuild after edits. The standard tools service has no source bind
+mount and does not use the host's `backend/node_modules` or `backend/dist`.
 
 | Command                                   | Purpose                                                                  |
 | ----------------------------------------- | ------------------------------------------------------------------------ |
@@ -158,7 +157,7 @@ Docker-only contributors can install/update the lockfile without host Node:
 
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" -e npm_config_cache=/tmp/npm-cache \
-  -v "$PWD:/app" -w /app node:26.13.0-bookworm-slim npm ci
+  -v "$PWD/backend:/app" -w /app node:26.13.0-bookworm-slim npm ci
 ```
 
 ## Commits and releases
@@ -169,16 +168,24 @@ A normal commit does not bump the version or create a release tag. `feat` recomm
 minor, `fix` recommends patch, and `!` or a `BREAKING CHANGE:` footer recommends major,
 including breaking changes on normally hidden types.
 
-From a checkout with Node.js >=26.13.0 <27, npm, and Git (or the Docker tools image), run:
+Release commands require a mounted Git checkout, unlike the ordinary copied-source
+tools service. From the repository root, prepare a Docker tools image and isolated
+dependencies; the checkout's `backend/` is the package working directory:
 
 ```sh
-npm run release:dry-run
-npm run release
+docker compose --env-file backend/.env --profile tools build tools
+# Mount the whole checkout for Git and the root changelog, with isolated node_modules.
+docker compose --env-file backend/.env --profile tools run --rm \
+  -v "$PWD:/workspace" -v /workspace/backend/node_modules -w /workspace/backend \
+  tools sh -c 'npm ci && npm run release:dry-run'
 ```
+
+Only when explicitly authorized, replace `release:dry-run` with `release`.
+The mount is writable because an authorized release updates the checkout.
 
 Both require `main` and a clean tree, including untracked files. Commit development
 changes before running them. Dry-run previews the recommendation without modifying
-files or Git. A release updates `package.json` and `package-lock.json`, generates
+files or Git. A release updates `backend/package.json` and `backend/package-lock.json`, generates
 `CHANGELOG.md`, archives older sections, then creates a `chore(release): vX.Y.Z`
 commit and annotated `vX.Y.Z` tag. Push, npm publishing, and GitHub Releases are disabled.
 
@@ -199,37 +206,36 @@ override patches release-it's transitive proxy dependency; no extra release tool
 ## Project structure and tooling
 
 ```text
-src/main.ts                 Composition, database startup, signals
-src/config.ts               Environment validation
-src/transport/server.ts     Shared Fastify/Socket.IO listener and health
-src/persistence/postgres.ts PostgreSQL pool
-src/persistence/players.ts  Player/Credential SQL repository
-src/persistence/migrations.ts Explicit migration runner
-src/application/password.ts Argon2id hashing and verification
-src/application/authenticate-player.ts Internal authentication/provisioning use cases
+backend/src/main.ts                 Composition, database startup, signals
+backend/src/config.ts               Environment validation
+backend/src/transport/server.ts     Shared Fastify/Socket.IO listener and health
+backend/src/persistence/postgres.ts PostgreSQL pool
+backend/src/persistence/players.ts  Player/Credential SQL repository
+backend/src/persistence/migrations.ts Explicit migration runner
+backend/src/application/password.ts Argon2id hashing and verification
+backend/src/application/authenticate-player.ts Internal authentication/provisioning use cases
 migrations/                 Versioned Player/Credential SQL
-src/domain/match-engine.ts  Pure Match lifecycle, answers, scoring and MatchResult
-src/application/            Registry, Coordinator, Clock/Scheduler contracts
-src/runtime/match-time.ts   Production monotonic clock and Node timer adapter
-src/README.md               Runtime APIs, ownership and retry/lifecycle policies
-tests/*.test.ts             Deterministic domain/runtime and infrastructure tests
-scripts/smoke.mjs           Smoke check for a running environment
+backend/src/domain/match-engine.ts  Pure Match lifecycle, answers, scoring and MatchResult
+backend/src/application/            Registry, Coordinator, Clock/Scheduler contracts
+backend/src/runtime/match-time.ts   Production monotonic clock and Node timer adapter
+backend/src/README.md               Runtime APIs, ownership and retry/lifecycle policies
+backend/tests/*.test.ts             Deterministic domain/runtime and infrastructure tests
+backend/scripts/smoke.mjs           Smoke check for a running environment
 docs/                       Preserved architectural and engineering designs
-Dockerfile                  Development, build, and minimal runtime stages
+backend/Dockerfile          Development, build, and minimal runtime stages
 docker-compose.yml          Backend, PostgreSQL, optional tooling profile
 ```
 
 Keep application and domain code independent of transport and database libraries;
-ESLint restrictions enforce those boundaries. See `src/README.md` for runtime
-admission, retry retention and shutdown contracts. Persistence will
-implement required ports, and `main.ts` will wire concrete dependencies.
+ESLint restrictions enforce those boundaries. See `backend/src/README.md` for runtime
+admission, retry retention and shutdown contracts. The composition root wires concrete persistence and transport adapters.
 
 TypeScript uses strict ESM/NodeNext with `.js` import specifiers. `tsx` executes
 TypeScript in tests/watch mode; production runs compiled JavaScript. Node's built-in
 test runner avoids an additional test framework. `pg` provides a small PostgreSQL
 pool without an ORM; `socket.io-client` is development-only for connection checks.
 ESLint handles code checks and Prettier formatting. `docs/` is excluded from automatic
-formatting to preserve existing designs. Commit `package-lock.json`; keep `.env`,
+formatting to preserve existing designs. Commit `backend/package-lock.json`; keep `.env`,
 `node_modules/`, `dist/`, caches, and local agent/cloud configuration out of Git.
 
 ## Authentication and sessions (Phase 4 Slice 2)

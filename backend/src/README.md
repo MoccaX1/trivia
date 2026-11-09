@@ -30,10 +30,10 @@ Socket.IO attaches directly to Fastify's `server`, sharing its single HTTP liste
 There are no gameplay handlers yet. HTTP login/logout/profile and Socket.IO cookie authentication now resolve trusted session identity; see the root README authentication contract. Health is
 process liveness, not database readiness. Startup checks PostgreSQL with `SELECT 1`.
 
-Authority: [system design](../docs/system-design.md),
-[runtime contracts](../docs/low-level-design.md),
-[database design](../docs/database-design.md), and
-[programming principles](../docs/programming-principles.md).
+Authority: [system design](../../docs/system-design.md),
+[runtime contracts](../../docs/low-level-design.md),
+[database design](../../docs/database-design.md), and
+[programming principles](../../docs/programming-principles.md).
 
 Phase 2A adds `QUESTION_OPEN` and `REVEAL` only. `startMatch` takes ten already
 selected, ordered played questions and an authoritative `openedAt` clock reading.

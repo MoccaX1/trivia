@@ -1,7 +1,7 @@
 services:
   backend:
     build:
-      context: .
+      context: ./backend
       target: runtime
     environment:
       HOST: 0.0.0.0
@@ -51,7 +51,7 @@ services:
   tools:
     profiles: [tools]
     build:
-      context: .
+      context: ./backend
       target: development
     environment:
       DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql://trivia:trivia_local@postgres:5432/trivia}

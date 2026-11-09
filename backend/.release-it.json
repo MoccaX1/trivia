@@ -13,11 +13,11 @@
   "github": { "release": false },
   "hooks": {
     "before:init": "node scripts/check-release-tree.mjs",
-    "after:@release-it/conventional-changelog:beforeRelease": "node scripts/archive-changelog.mjs"
+    "after:@release-it/conventional-changelog:beforeRelease": "cd .. && node backend/scripts/archive-changelog.mjs && git add --all -- ."
   },
   "plugins": {
     "@release-it/conventional-changelog": {
-      "infile": "CHANGELOG.md",
+      "infile": "../CHANGELOG.md",
       "header": "# Trivia Game Changelog\n\nNotable changes are generated from Conventional Commits during versioned releases.",
       "tagPrefix": "v",
       "strictSemVer": true,

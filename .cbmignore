@@ -66,3 +66,16 @@ build/
 
 
 .codebase-memory
+
+# Generated output and secrets anywhere in the unified monorepo.
+**/node_modules/
+**/dist/
+**/coverage/
+**/.angular/
+**/*.tsbuildinfo
+**/*.log
+**/.env
+**/.env.*
+/.git/
+/.codex/
+/.aws/
