@@ -24,7 +24,9 @@ remain authoritative. Open/deferred policies require an approved decision.
 ## Prerequisites
 
 - Docker Engine with Docker Compose v2 or newer.
-- Node.js 24.15+ and its bundled npm for native development (optional for Docker-only use).
+- Docker images pin Node.js 26.13.0 LTS (Debian Bookworm); tools and production use
+  the same runtime. Native development is optional and requires Node.js >=26.13.0 <27.
+  Verification uses Docker, with isolated dependencies/builds and disposable PostgreSQL.
 - Free local ports 3000 and 5432, or alternatives set in `.env`.
 
 If ports are occupied, change `PORT` and `POSTGRES_PORT` in `.env` and update the
@@ -156,7 +158,7 @@ Docker-only contributors can install/update the lockfile without host Node:
 
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" -e npm_config_cache=/tmp/npm-cache \
-  -v "$PWD:/app" -w /app node:24-bookworm-slim npm ci
+  -v "$PWD:/app" -w /app node:26.13.0-bookworm-slim npm ci
 ```
 
 ## Commits and releases
@@ -167,7 +169,7 @@ A normal commit does not bump the version or create a release tag. `feat` recomm
 minor, `fix` recommends patch, and `!` or a `BREAKING CHANGE:` footer recommends major,
 including breaking changes on normally hidden types.
 
-From a checkout with Node.js 24.15+, npm, and Git, run:
+From a checkout with Node.js >=26.13.0 <27, npm, and Git (or the Docker tools image), run:
 
 ```sh
 npm run release:dry-run

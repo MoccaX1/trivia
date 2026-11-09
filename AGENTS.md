@@ -7,7 +7,7 @@ Read all relevant `docs/*.md` before changing behavior.
 `docs/low-level-design.md` owns runtime contracts;
 `docs/database-design.md` owns durable constraints.
 Follow `docs/programming-principles.md`; consult component and data-flow diagrams
-for ownership. The approved bootstrap stack is Node.js 24, TypeScript, Fastify,
+for ownership. The approved runtime is Node.js 26.13.0 LTS with TypeScript, Fastify,
 Socket.IO, PostgreSQL, and Docker Compose. Fastify supersedes the documents' older
 NestJS technology suggestion. Preserve design documents unless explicitly asked
 to update them.
@@ -57,7 +57,7 @@ and verify coverage for relied-on files.
 ## Release Workflow
 
 Normal development commits do not bump versions. Use `npm run release:dry-run`
-and, only when requested, `npm run release` from clean `main` with Node.js 24.15+
+and, only when requested, `npm run release` from clean `main` with Node.js >=26.13.0 <27
 and Git. `!`/`BREAKING CHANGE:` retain major-bump semantics, even on hidden types.
 Release-it synchronizes package/lock versions, generates notes, archives sections
 beyond the newest ten, then commits all release files and creates an annotated tag.

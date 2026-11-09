@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS development
+FROM node:26.13.0-bookworm-slim AS development
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -13,7 +13,7 @@ CMD ["npm", "run", "dev"]
 FROM development AS build
 RUN npm run build
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:26.13.0-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json package-lock.json ./

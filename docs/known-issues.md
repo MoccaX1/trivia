@@ -694,6 +694,39 @@ Verified contracts worth preserving: server-generated Player UUIDs; native UUID 
 
 Graph coverage for src/tests/migrations reported no recorded gaps (best-effort metadata); direct source reads supplied material behavior evidence. No reindexing was requested. Two .codebase-memory files were already modified at task entry and were left alone. The initial registry task ran no migrations/runtime/audit. Slice 2 used isolated PostgreSQL fixtures and captured a current dependency audit; RISK-004 records unresolved findings.
 
+### Node 26 runtime maintenance verification
+
+**Status: promoted after Stage A PASS; Stage B PASS.** Both Dockerfile targets now
+pin official `node:26.13.0-bookworm-slim`; Compose tools and backend share that
+Dockerfile. Verified base digest:
+`sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68`.
+Actual runtime: Node 26.13.0, npm 11.20.0, V8 14.6.202.34-node.40, module ABI 147,
+OpenSSL 3.5.9, Debian 12/glibc, Linux x64. The official image includes libatomic1;
+native Argon2 2.2.2 verifies passwords with clean development and production-only
+installs. Dependency versions/integrities are unchanged; only the root lockfile
+Node engine metadata changed. Existing Node 24 typings remain sufficient for the
+unchanged application APIs; no tooling upgrade was required.
+
+Isolated clean installs and full checks passed with disposable PostgreSQL 17:
+Node 24.21.0/npm 11.19.0 baseline **236/0/0**, Node 26 Stage A **236/0/0**, and
+promoted Compose tools Stage B **236/0/0** (passed/failed/skipped). Targeted
+S2-01/A3-01/A4-01/A6-01 checks passed **27/0/0** under Node 26 in both stages.
+Each Node 26 stage completed real ten-question/ten-reveal gameplay, COMMIT,
+fresh-connection readback, participant-private History, outsider denial and
+authenticated polling/WebSocket smoke. Stage B used compiled JavaScript in the
+production image; active-client SIGTERM exited 0. A retained Node 24 production
+image also passed authenticated smoke and SIGTERM (exit 0), supporting rollback.
+Local loopback development policy was explicitly configured only for these
+disposable tests; no production TLS deployment or other CPU architecture is claimed.
+
+No new runtime-specific blocker was found. The pre-promotion root-engine warning
+was expected and disappears with the approved metadata change. Both npm versions
+reported the same esbuild install-script advisory; working tests/native loading
+were verified rather than inferred from installation. Installer audits reported
+ten development-only Moderate findings and zero production findings; RISK-004
+and the five/six manual-script lint/format failures (TEST-005) remain open.
+Accepted gameplay, recovery, retention and A6-02 limitations remain unchanged.
+
 ## 11. Maintenance rules
 
 - Assign the next unused ID within the primary category. Never renumber or reuse IDs; retain references if recategorization is necessary.
