@@ -1297,6 +1297,47 @@ Conceptual access contracts:
 | Own History List | Query that Player's committed participations; newest first by `finishedAt DESC, matchId DESC`; SQL-limited results |
 | History Detail | Verify requesting Player participated before returning summary, scoreboard, ordered snapshots, and own question results |
 
+#### Approved History HTTP contract (Phase 4 Slice 6)
+
+- `GET /history?limit=20&cursor=...`: default 20, maximum 50; reject invalid,
+  repeated or unknown parameters. SQL filters by the session Player and orders
+  `finished_at DESC, match_id DESC`, fetching at most `limit + 1`. Participant
+  counts are derived only for returned Matches. Response: `{ items, nextCursor }`;
+  each item contains `matchId`, `finishedAt`, `ownResult: { score: { scoreUnits }, rank }`
+  and `participantCount`. Empty pages have an empty array and null cursor.
+- Cursors are unsigned canonical base64url JSON `{ v: 1, finishedAt, matchId }`,
+  at most 512 encoded characters, with exact millisecond UTC ISO timestamps and
+  lowercase UUIDs. Reject malformed/noncanonical/unsupported cursors with 400.
+  The last returned item supplies the next cursor. No expiry or anchor-existence
+  check: this is a seek position, never an authorization credential. Valid altered
+  positions cannot change the authenticated Player filter. Each request sees
+  committed data, not a frozen multi-page snapshot; refresh from page one to find
+  older completions committed after their position was traversed.
+- `GET /history/:matchId`: validate UUID and authorize committed participation in
+  SQL before graph reads. Return `{ match, participants, questions }`. Match has
+  `matchId`, `startedAt`, `finishedAt`, `hostPlayerId`. Public standings have
+  `playerId`, current trusted `displayName`, `score: { scoreUnits }`, `rank`;
+  order by exact score descending, UUID ascending solely for deterministic tied
+  output, without changing tied ranks. Names are not historical snapshots.
+- Questions have `questionNumber`, `text`, ordered `choices: [{ choiceId, text }]`,
+  `correctChoiceId`, and only the requester's `ownResult: { selectedChoiceId,
+  attemptCount, finalAnsweredMs, score: { scoreUnits } }`. Unanswered choice/time
+  are null. Use persisted positions, not invented original question IDs. Read only
+  the viewer's private rows; explicitly construct DTOs. Scores are decimal strings;
+  timestamps are UTC ISO with milliseconds. No live Registry or mutable content reads.
+- Bind guards to the registered routes, including encoded spellings. Reuse secure
+  transport/Origin/CORS policy; absent Origin is allowed on these safe GETs without
+  Referer, while present null/disallowed Origins reject. All responses use no-store.
+  Validate sessions before SQL and synchronously inspect again immediately before
+  sending private data; expiry/revocation during SQL yields 401. Reads never refresh
+  idle, replace cookies or use `SessionStore.act`.
+- Errors: 400 `INVALID_REQUEST`; 401 `UNAUTHENTICATED`; 403 `ORIGIN_FORBIDDEN`;
+  uniform 404 `NOT_FOUND` for valid absent/unauthorized/nonpersisted IDs;
+  503 `HISTORY_UNAVAILABLE` for storage failure; 500 `INTERNAL_ERROR` for missing
+  required profiles or inconsistent/incomplete detail. Return no partial detail or
+  raw storage rows; log safe classifications only. Reuse the shared pool and existing
+  bounded shutdown ownership; introduce no worker, migration, index or retry policy.
+
 #### Approved authentication/session contract (Phase 4 Slice 2)
 
 - `POST /auth/login`: exact JSON username/password strings; 4 KiB body, ASCII
@@ -1330,7 +1371,8 @@ Conceptual access contracts:
   without Secure; other insecure peers/deployments reject.
 - Exact configured normalized browser Origin allowlist and JSON-only state-changing
   auth endpoints implement the approved demo CSRF posture. Reject missing/null
-  Origin; no wildcard reflection. The sole safe-GET exception is `/auth/profile`: absent
+  Origin; no wildcard reflection. Safe-GET exceptions are `/auth/profile` and the
+  two approved History routes: absent
   Origin is allowed without Referer, while present null/disallowed origins reject.
   Session authentication, read-only behavior, no idle refresh and no-store remain
   mandatory. Login/logout and all Socket.IO handshakes still require Origin. Credentialed preflight supports approved same-site
@@ -1347,7 +1389,7 @@ Conceptual access contracts:
 
 These are login resource bounds, not a password-creation policy. Gameplay Gateway,
 active reconnect/rejoin, registration and password recovery are outside this slice.
-History cursor format remains open. Do not create an HTTP gameplay bypass or expose
+History pagination follows the Slice 6 contract above. Do not create an HTTP gameplay bypass or expose
 mutable current Question Bank content as historical facts.
 
 ### 5.8 Internal Interfaces
@@ -2130,7 +2172,7 @@ correct/selected Choice membership, scores, ranks, and shared completion timesta
 See [database design §8](database-design.md#8-access-patterns-and-indexes).
 History List uses `(player_id, finished_at DESC, match_id DESC)`.
 Detail requires participation authorization and reconstructs bounded Match snapshots.
-Cursor format, stored participant count, and permanent source lineage remain open.
+Slice 6 cursor and derived participant count follow §5.7; permanent source lineage remains open.
 
 ### 7.7 Score Representation
 
@@ -2317,9 +2359,8 @@ reconstruction, and all phase transitions using controlled time.
 
 ### 10.1 Open Questions
 
-- History cursor representation, page-size limits, response metadata, malformed/stale
-  cursor behavior; retain the approved chronological physical access path.
-- Stored versus derived completed participant count.
+- History HTTP pagination and derived participant count are settled in §5.7;
+  preserve the approved chronological physical access path.
 - Permanent source Question/Choice lineage; snapshots remain independently reconstructable.
 - Authentication/session decisions are settled in §5.7; password-creation policy remains open.
 - Source-lineage identifier representations and deletion/retention policy remain

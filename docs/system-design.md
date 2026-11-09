@@ -1010,7 +1010,7 @@ The approved physical access path is:
 (player_id, finished_at DESC, match_id DESC)
 ```
 
-The external pagination cursor contract remains open.
+The approved Slice 6 HTTP keyset cursor and bounded page contract are defined in LLD §5.7.
 
 History Detail reads the bounded completed-Match snapshot graph.
 
@@ -1225,8 +1225,9 @@ prefix under HTTPS. Explicit local non-production loopback mode is the sole inse
 exception. Exact configured Origin validation, JSON-only state-changing auth actions
 and credentialed CORS support same-origin or approved cross-origin same-site topology;
 true cross-site credentialed deployment is excluded. Safe read-only GET /auth/profile
-permits absent Origin without Referer, but validates every present Origin and rejects
-null/disallowed values. It still requires a session, never refreshes idle and uses
+and the approved GET /history and GET /history/:matchId routes
+permit absent Origin without Referer, but validate every present Origin and reject
+null/disallowed values. Each still requires a session, never refreshes idle and uses
 no-store. Login/logout and all Socket.IO handshakes require Origin. Production fails closed without
 HTTPS/origin configuration. Browser Origin checks also cover WebSocket handshakes.
 

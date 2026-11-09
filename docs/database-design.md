@@ -270,7 +270,8 @@ MATCH_PARTICIPANT (player_id, finished_at DESC, match_id DESC)
 Return Match identity, completion time, own score/rank, and participant count.
 Chronological lookup uses participation rows directly; enrich only as needed.
 Do not load all History into application memory. Equal timestamps are ordered by Match ID.
-The external keyset cursor/page-size/metadata contract remains open.
+Slice 6 uses the LLD §5.7 keyset contract (default 20, maximum 50, limit + 1
+look-ahead); the cursor is a seek position, not a cross-request snapshot.
 
 ### 8.3 Match History Detail
 
@@ -284,7 +285,7 @@ index is currently justified. Detail reads snapshots only, never mutable Questio
 ### 8.4 Participant Count
 
 Can be derived with `MATCH_PARTICIPANT WHERE match_id = ?`.
-Whether to store an immutable `participant_count` on Match remains open.
+Slice 6 derives this count only for the bounded returned page; no stored count is added.
 
 ## 9. Completed-Match Persistence
 
@@ -359,8 +360,8 @@ Only the Match Engine mutates authoritative live gameplay.
 
 - Source-lineage identifier representations and retention/deletion policies;
   Player/Match UUIDs and dependent composite keys are approved for Slice 5.
-- External History cursor, page-size limits, response metadata, invalid-cursor behavior.
-- Stored versus derived completed participant count.
+- History HTTP cursor/limits/error metadata and derived participant count are approved
+  in LLD §5.7; no additional schema or index is required for Slice 6.
 - Permanent source Question/Choice lineage and any future source FK policy.
 - Question Bank authoring, versioning, deletion, and audit workflow.
 - Active-Match recovery is outside M1; adding it requires a system-design update.

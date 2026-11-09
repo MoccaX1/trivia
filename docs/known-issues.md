@@ -24,12 +24,12 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 | LIM | 0 | 3 | 0 | 3 |
 | RISK | 1 | 0 | 4 | 5 |
 | DEBT | 2 | 0 | 0 | 2 |
-| DEC | 9 | 0 | 4 | 13 |
-| TEST | 4 | 0 | 1 | 5 |
+| DEC | 8 | 0 | 5 | 13 |
+| TEST | 3 | 0 | 2 | 5 |
 | OPS | 2 | 0 | 1 | 3 |
-| DEF | 1 | 2 | 2 | 5 |
+| DEF | 0 | 2 | 3 | 5 |
 
-Total: **41** records; **5 ACCEPTED**, **19 OPEN**, **17 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **41** records; **5 ACCEPTED**, **16 OPEN**, **20 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
@@ -49,16 +49,13 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 | [DEC-006](#dec-006) | Host departure and active disconnect policy | OPEN | UNDETERMINED | future design |
 | [DEC-007](#dec-007) | Enabled earlyClose behavior | OPEN | UNDETERMINED | future design |
 | [DEC-008](#dec-008) | Other SQL identifiers and deletion/retention policy | OPEN | UNDETERMINED | undecided |
-| [DEC-009](#dec-009) | External History pagination and participant count | OPEN | UNDETERMINED | undecided |
 | [DEC-010](#dec-010) | Capacity and operational service targets | OPEN | UNDETERMINED | undecided |
 | [DEC-011](#dec-011) | Question selection, source lineage and Provider failures | OPEN | UNDETERMINED | undecided |
 | [DEC-012](#dec-012) | Future recovery and interrupted-admission fairness | OPEN | UNDETERMINED | future design |
 | [DEC-013](#dec-013) | Broader product and anti-cheat requirements | OPEN | UNDETERMINED | future design |
 | [TEST-001](#test-001) | Real PostgreSQL verification is conditional | OPEN | MEDIUM | current demo |
 | [TEST-002](#test-002) | Migration rollback and concurrent-run coverage is incomplete | OPEN | MEDIUM | before public deployment |
-| [TEST-004](#test-004) | Authenticated Match-to-History end-to-end verification absent | OPEN | HIGH | current demo |
 | [TEST-005](#test-005) | Full-checkout manual scripts fail existing lint rules | OPEN | LOW | later hardening |
-| [DEF-003](#def-003) | Completed persistence and authorized History pending | OPEN | HIGH | current demo |
 | [DEF-004](#def-004) | Account recovery and advanced authentication excluded | ACCEPTED | UNDETERMINED | future design |
 | [DEF-005](#def-005) | Bots, tournaments and human score formatting deferred | ACCEPTED | LOW | future design |
 
@@ -362,15 +359,15 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 <a id="dec-009"></a>
 
-### DEC-009 — External History pagination and participant count
+### DEC-009 — History pagination and derived participant count approved
 
-- **Category / status:** DEC / OPEN. **Severity / priority:** UNDETERMINED / UNDECIDED.
-- **Component / phase:** History; Phase 4. **Target:** undecided.
+- **Category / status:** DEC / RESOLVED. **Severity / priority:** UNDETERMINED / UNDECIDED.
+- **Component / phase:** History; Phase 4 Slice 6. **Target:** current demo.
 - **Evidence:** [Database §§8.2,15](database-design.md#82-player-history-list); [LLD §10.1](low-level-design.md#101-open-questions).
-- **Concern:** Cursor/page limits/error metadata and stored-versus-derived count remain open.
-- **Policy / status:** Own chronological SQL-limited access and participation-authorized Detail are settled.
-- **Impact:** Affects external API and physical count representation.
-- **Next action:** Approve API details before History integration; preserve existing indexes/access rules.
+- **Concern (historical):** Cursor/page limits/error metadata and stored-versus-derived count required approval.
+- **Policy / status:** Slice 6 approves GET List/Detail, default 20/max 50, unsigned versioned base64url seek cursors, strict validation, derived bounded-page counts and uniform participant-authorized Detail 404s. Pagination is not a frozen snapshot; late commits may require refresh. LLD §5.7 owns exact DTO/security/error contracts.
+- **Impact:** Implemented without new columns, indexes, secrets or cursor expiry.
+- **Next action:** Preserve pagination and cross-player authorization regressions.
 - **Related:** DEF-003.
 
 <a id="dec-010"></a>
@@ -468,15 +465,16 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 <a id="test-004"></a>
 
-### TEST-004 — Authenticated Match-to-History end-to-end verification absent
+### TEST-004 — Authenticated Match-to-History retrieval verified
 
-- **Category / status:** TEST / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** TEST / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Integration; Phase 4. **Target:** current demo.
-- **Evidence:** [LLD §9.9](low-level-design.md#99-end-to-end-critical-path); [transport tests](../tests/server.test.ts); [main](../src/main.ts).
-- **Concern:** Slice 5 verifies authenticated gameplay through automatic atomic completion and independent database readback, but History endpoints/authorization remain absent.
-- **Policy / status:** Two-client PostgreSQL integration compares the complete durable graph with Engine MatchResult. Real-clock polling/WebSocket smoke verifies ten reveals, commit and independent readback. This record remains OPEN for authorized History.
-- **Impact:** Live gameplay-to-storage is verified; full authenticated Match-to-History retrieval is not yet available.
-- **Next action:** Add separately approved History List/Detail tests without weakening current gameplay, completion or session regressions.
+- **Evidence:** [LLD §9.9](low-level-design.md#99-end-to-end-critical-path); [History tests](../tests/history.test.ts); [gameplay-to-History test](../tests/lobby.test.ts); [main](../src/main.ts).
+- **Concern (historical):** Slice 5 stopped at database readback; authenticated History retrieval was unverified.
+- **Policy / status:** Slice 6 extends authenticated two-client ten-question PostgreSQL integration through automatic completion, independent graph readback, History List/Detail and nonparticipant denial. Dedicated tests cover paging, viewer-only SQL, current names, corrupt graphs, non-refreshing session rechecks, Origin and encoded-route guards.
+- **Verification:** Full suite with disposable PostgreSQL: **235 passed, 0 failed, 0 skipped** (baseline 214). History/lobby suites: **57 passed**. Real-clock two-client polling/WebSocket gameplay completed ten question/reveal cycles, COMMIT, fresh-connection readback, encoded History List and viewer-safe Detail for both participants; nonparticipant List was empty and Detail matched absent-ID 404. Authenticated smoke and active-client SIGTERM shutdown passed (exit 0). SQL BIGINT stress is explicitly not a legal M1 scoring fixture.
+- **Impact:** Demo-critical History retrieval is covered; this does not establish production deployment or crash recovery.
+- **Next action:** Preserve these integration gates and complete independent Slice 6 review.
 - **Related:** DEF-001, DEF-002, DEF-003.
 
 <a id="test-005"></a>
@@ -523,16 +521,17 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 <a id="def-003"></a>
 
-### DEF-003 — Completed persistence and authorized History pending
+### DEF-003 — Completed persistence and authorized HTTP History implemented
 
-- **Category / status:** DEF / OPEN. **Severity / priority:** HIGH / UNDECIDED.
+- **Category / status:** DEF / RESOLVED. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Persistence/History; Phase 4. **Target:** current demo.
 - **Evidence:** [Database §§9–11](database-design.md#9-completed-match-persistence); [migrations](../migrations/001_player_identity.sql); [LLD §6.9](low-level-design.md#69-persist-completed-match).
-- **Concern:** Slice 5 implements completed storage; HTTP/Socket.IO History APIs remain excluded and absent.
+- **Concern (historical):** Completed persistence and authorized retrieval were missing; Slice 5 implemented storage.
 - **Policy / status:** Migration 003 stores the five-table graph with UUIDs, millisecond timestamps, bigint scores, composite membership FKs and a deferred correct-choice FK. The repository commits atomically or verifies complete durable equivalence. Application ownership captures FINISHED before Registry cleanup, tracks one active attempt per Match, and exposes controlled in-process retry with pending/succeeded/failed/unconfirmed outcomes. Gateway observer/public wire contracts remain unchanged.
 - **Verification:** Full suite with disposable PostgreSQL: **214 passed, 0 failed, 0 skipped** (baseline 198). Tests cover real concurrent saves/conflicts, atomic rollback/visibility, lost COMMIT response, explicit retry, live FINISHED isolation from write failure, FIFO/shutdown capture and the existing 10-second watchdog. Real-clock two-client gameplay produced ten reveals, automatic commit and fresh-connection readback of 10 questions/40 choices/20 answers, exact standings and timestamps; active-client SIGTERM exited 0. Exact schema BIGINT stress beyond JS safe integers was tested inside a rolled-back SQL transaction, not misrepresented as a legal M1 award.
 - **Impact:** FINISHED remains live state, not a client durability guarantee. History becomes visible only after commit; finish-to-commit process loss remains unrecoverable in M1. Nonconfirmed shutdown drain exits nonzero; no automatic retry worker or additional timeout budget was added.
-- **Next action:** Discover/approve bounded, participant-authorized History List/Detail contracts. Preserve failure diagnostics, ambiguity resolution, complete equivalence and lifecycle tests.
+- **Slice 6:** GET /history and GET /history/:matchId read committed PostgreSQL only, with SQL membership authorization, viewer-only answer reads, explicit DTOs, exact scores, current trusted names and no-store. Session validity is inspected again before delivery without refreshing idle. No Socket.IO History, schema/index changes or recovery workflow is added. Verification is recorded in TEST-004.
+- **Next action:** Independent Slice 6 audit; preserve storage ambiguity/equivalence/lifecycle and History privacy/security regressions.
 - **Related:** DEC-008, DEC-009, TEST-004.
 
 <a id="def-004"></a>

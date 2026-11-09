@@ -11,6 +11,7 @@ import { readAuthPolicy } from './transport/auth-policy.js';
 import { MatchCoordinator } from './application/match-coordinator.js';
 import { MatchCompletions } from './application/match-completions.js';
 import { CompletedMatchRepository } from './persistence/completed-matches.js';
+import { HistoryRepository } from './persistence/history.js';
 
 // Log stable failure codes only: driver messages/stacks can contain credentials.
 function failureCode(error: unknown) {
@@ -67,6 +68,7 @@ export async function runBackend(
         },
         lobby: { coordinator, players },
         completions,
+        history: new HistoryRepository(database),
       });
     } catch (error) {
       await database.end();

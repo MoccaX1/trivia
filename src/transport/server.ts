@@ -8,19 +8,24 @@ import { allowedOrigin, secureRequest } from './auth-policy.js';
 import { installLobbyGateway } from './lobby-gateway.js';
 import type { LobbyRuntime } from './lobby-gateway.js';
 import type { MatchCompletions } from '../application/match-completions.js';
+import type { HistoryReader } from '../application/history.js';
+import { installHistory } from './history.js';
 
 export function createServer({
   logger = false,
   auth,
   lobby,
   completions,
+  history,
 }: {
   logger?: boolean | { level: string; stream?: Writable };
   auth?: Authentication;
   lobby?: LobbyRuntime;
   completions?: MatchCompletions;
+  history?: HistoryReader;
 } = {}) {
   if (lobby && !auth) throw new TypeError('Lobby requires authentication');
+  if (history && !auth) throw new TypeError('History requires authentication');
   const http = Fastify({
     logger: logger
       ? {
@@ -77,6 +82,7 @@ export function createServer({
   });
   if (auth) installAuthentication(http, realtime, auth);
   else realtime.use((_socket, next) => next(new Error('UNAUTHENTICATED')));
+  if (auth && history) installHistory(http, auth, history);
   const closeLobby =
     auth && lobby
       ? installLobbyGateway(realtime, auth, lobby, (code, matchId) =>

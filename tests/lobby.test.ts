@@ -13,6 +13,8 @@ import type { LobbySnapshot } from '../src/application/lobby-presenter.js';
 import type { MatchSnapshot } from '../src/application/match-presenter.js';
 import { demoQuestions } from '../src/application/demo-questions.js';
 import { MatchCompletions } from '../src/application/match-completions.js';
+import type { HistoryReader } from '../src/application/history.js';
+import { HistoryRepository } from '../src/persistence/history.js';
 import {
   CompletedMatchRepository,
   readDurableMatch,
@@ -86,6 +88,7 @@ async function fixture(
   t: TestContext,
   repository?: PlayerRepository,
   completions?: MatchCompletions,
+  history?: HistoryReader,
 ) {
   let now = 0;
   const tasks = new Set<{ at: number; callback: (error?: unknown) => void }>();
@@ -142,6 +145,7 @@ async function fixture(
     auth,
     lobby: { coordinator, players: { findPlayerById: (id) => readProfile(id) } },
     ...(completions ? { completions } : {}),
+    ...(history ? { history } : {}),
   });
   const clients: Client[] = [];
   t.after(async () => {
@@ -1346,7 +1350,7 @@ test(
     const aProfile = await provisionPlayer(repository, 'Alice', ' Nguyễn 👩‍💻 ', 'fixture-password');
     const bProfile = await provisionPlayer(repository, 'Bob', 'Đặng', 'fixture-password');
     const completions = new MatchCompletions(new CompletedMatchRepository(pool));
-    const f = await fixture(t, repository, completions),
+    const f = await fixture(t, repository, completions, new HistoryRepository(pool)),
       a = await f.connect('ALICE'),
       b = await f.connect('bob');
     const { matchId } = await accepted(command(a, 'CreateMatch', {}));
@@ -1371,6 +1375,38 @@ test(
     } finally {
       await fresh.end();
     }
+    const list = await f.server.inject({ url: '/%68istory', headers: { cookie: a.cookie } });
+    assert.equal(list.statusCode, 200);
+    assert.equal(list.json().items[0].matchId, matchId);
+    const detail = await f.server.inject({
+      url: `/history/${matchId}`,
+      headers: { cookie: b.cookie },
+    });
+    assert.equal(detail.statusCode, 200);
+    assert.equal(detail.json().questions.length, 10);
+    assert.deepEqual(
+      detail
+        .json()
+        .participants.map((p: { score: { scoreUnits: string }; rank: number }) => ({
+          scoreUnits: p.score.scoreUnits,
+          rank: p.rank,
+        }))
+        .sort((a: { scoreUnits: string }, b: { scoreUnits: string }) =>
+          a.scoreUnits.localeCompare(b.scoreUnits),
+        ),
+      finished.match.result.participants
+        .map((p) => ({ scoreUnits: p.finalScoreUnits.toString(), rank: p.finalRank }))
+        .sort((a, b) => a.scoreUnits.localeCompare(b.scoreUnits)),
+    );
+    const outsider = await f.auth.sessions.create({
+      id: randomUUID(),
+      displayName: 'Nonparticipant',
+    });
+    const denied = await f.server.inject({
+      url: `/history/${matchId}`,
+      headers: { cookie: `trivia_session=${outsider}` },
+    });
+    assert.equal(denied.statusCode, 404);
     await f.server.close();
   },
 );
