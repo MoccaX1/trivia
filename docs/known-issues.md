@@ -20,8 +20,8 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 
 | Category | OPEN | ACCEPTED | RESOLVED | Total |
 |---|---:|---:|---:|---:|
-| BUG | 0 | 0 | 5 | 5 |
-| LIM | 0 | 3 | 0 | 3 |
+| BUG | 0 | 0 | 6 | 6 |
+| LIM | 0 | 4 | 0 | 4 |
 | RISK | 1 | 0 | 4 | 5 |
 | DEBT | 2 | 0 | 0 | 2 |
 | DEC | 8 | 0 | 5 | 13 |
@@ -29,17 +29,18 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 | OPS | 2 | 0 | 1 | 3 |
 | DEF | 0 | 2 | 3 | 5 |
 
-Total: **41** records; **5 ACCEPTED**, **16 OPEN**, **20 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **43** records; **6 ACCEPTED**, **16 OPEN**, **21 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
-Includes accepted limitations/exclusions; resolved decisions/mitigations retain their detailed records in §6 and historical defects are in §9. Active priorities are UNDECIDED; resolved BUG-004 retains its explicitly approved P0 remediation priority.
+Includes accepted limitations/exclusions; resolved decisions/mitigations retain their detailed records in §6 and historical defects are in §9. Active priorities are UNDECIDED unless explicitly assigned; resolved BUG-004 retains its explicitly approved P0 remediation priority.
 
 | ID | Concern | Status | Severity | Proposed target |
 |---|---|---|---|---|
 | [LIM-001](#lim-001) | Post-commit deadline scheduling can stall a Match | ACCEPTED | HIGH | current demo |
 | [LIM-002](#lim-002) | Active Matches are lost on process restart | ACCEPTED | HIGH | current demo |
 | [LIM-003](#lim-003) | Completed aggregates and retry receipts retained until shutdown | ACCEPTED | MEDIUM | later hardening |
+| [LIM-004](#lim-004) | A6-02: Coherent direct SQL rewrites are not always detectable | ACCEPTED | MEDIUM | current demo |
 | [OPS-002](#ops-002) | Production HTTPS, secret and deployment procedures are unspecified | OPEN | HIGH | before public deployment |
 | [OPS-003](#ops-003) | Health is liveness, not operational readiness | OPEN | MEDIUM | before public deployment |
 | [RISK-004](#risk-004) | Development dependency advisories remain unremediated | OPEN | MEDIUM | before public deployment |
@@ -101,6 +102,19 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 - **Impact:** Memory grows with process lifetime, Match count, and unique command IDs; restart removes replay capability.
 - **Next action:** Measure memory at intended load; do not add eviction without changing approved retention contract.
 - **Related:** DEC-010.
+
+<a id="lim-004"></a>
+
+### LIM-004 — A6-02: Coherent direct SQL rewrites are not always detectable
+
+- **Category / status:** LIM / ACCEPTED. **Severity / priority:** MEDIUM / P2.
+- **Component / phase:** Durable History integrity validation; Phase 4 Slice 6. **Target:** current demo.
+- **Evidence:** [LLD History integrity boundary](low-level-design.md#approved-history-http-contract-phase-4-slice-6); [History reader](../src/persistence/history.ts); [Database §§4.6,5,8.4](database-design.md#46-match_question_choice_snapshot).
+- **Concern:** Independent disposable-SQL probes removed an unused trailing Choice or a non-Host participant and their answers, preserving constraints and a coherent smaller graph; History returned 200. No approved writer/client path producing these modifications was established.
+- **Policy / status:** Explicitly accepted M1 limitation. Reads detect structural contradictions, schema violations and provably missing relationships/results, plus score/rank/answer inconsistencies where stored authoritative evidence suffices. They do not detect every direct rewrite producing another valid graph; original cardinality is not independently recorded.
+- **Impact:** Atomic/idempotent application persistence and structural read validation do not establish arbitrary SQL tamper detection. Existing detectable-corruption checks remain mandatory and return safe 500 responses.
+- **Next action:** Preserve current validation; any stronger tamper-evidence requirement needs separate approval. No new manifests, hashes, schema, triggers, audit infrastructure, repairs or reconciliation are approved.
+- **Related:** BUG-006, DEF-003.
 
 ### OPS records
 
@@ -642,6 +656,21 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 - **Remaining scope:** Side effects are best-effort and are not awaited, cancelled or drained by Coordinator shutdown. No retry worker, additional queue, recovery policy, gameplay or transport change was introduced. Historical tooling/dependency issues remain open.
 - **Next action:** Preserve child-process survival, thenable, pending-listener, receipt identity and timer regressions for future callback integrations.
 - **Related:** OPS-001, LIM-001, RISK-005.
+
+<a id="bug-006"></a>
+
+### BUG-006 — A6-01: Malformed URL errors exposed router details and lacked no-store
+
+- **Category / status:** BUG / RESOLVED. **Severity / priority:** LOW / P2.
+- **Component / phase:** HTTP router early-error boundary; Phase 4 Slice 6. **Target:** current demo.
+- **Evidence:** [router-level handler](../src/transport/server.ts); A6-01 real-listener regression in [History tests](../tests/history.test.ts); [LLD §5.7](low-level-design.md#approved-history-http-contract-phase-4-slice-6).
+- **Concern:** Malformed percent/UTF-8 path components failed before route selection, returning Fastify's FST_ERR_BAD_URL envelope, echoed malformed input and no Cache-Control. No History data or authentication bypass was demonstrated.
+- **Remediation:** Supported global routerOptions.onBadUrl rejects decoding failures with only 400 `{ code: 'INVALID_REQUEST' }`, JSON content type and no-store. It neither examines/decodes input nor forwards to a handler. Route-bound authentication/Origin checks, ordinary HTTP error mapping and session behavior remain unchanged.
+- **Verification:** The real-listener regression failed before the fix (0 passed, 1 failed), then passed for all four malformed paths under missing/valid sessions and disallowed/null Origins. It verifies zero History reads, no cookies, no raw/internal diagnostics and unchanged valid encoded History/health behavior; an unrelated thrown error still maps to 500 INTERNAL_ERROR.
+- **Regression results:** Full suite with disposable PostgreSQL: **236 passed, 0 failed, 0 skipped**. History: **22 passed**; S2-01/A3-01/A4-01: **23 passed**; completion repository/lifecycle: **15 passed**. Typecheck, temporary-output build and scoped lint/format passed. Root manual-script lint/format debt and development advisories remain unrelated and open.
+- **Impact:** Early malformed-URL failures now honor the safe HTTP error envelope and cache contract globally.
+- **Next action:** Preserve early-router and existing S2-01/History regressions.
+- **Related:** BUG-004, LIM-004, TEST-004.
 
 ## 10. Historical coverage and evidence limitations
 

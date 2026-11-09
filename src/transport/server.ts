@@ -36,6 +36,17 @@ export function createServer({
     logController: new LogController({ disableRequestLogging: true }),
     trustProxy: auth?.policy.trustProxy ?? false,
     return503OnClosing: true,
+    routerOptions: {
+      // Decoding can fail before route hooks exist. Reject globally without
+      // inspecting/decoding the path or inventing an authenticated route identity.
+      onBadUrl: (_path, _request, response) => {
+        response.writeHead(400, {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+        });
+        response.end(JSON.stringify({ code: 'INVALID_REQUEST' }));
+      },
+    },
   });
   const existingCloseListeners = new Set(http.server.listeners('close'));
   const realtime = new Server(http.server, {

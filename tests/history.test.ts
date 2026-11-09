@@ -3,6 +3,8 @@ import test from 'node:test';
 import type { TestContext } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
+import { request } from 'node:http';
+import type { IncomingHttpHeaders } from 'node:http';
 import pg from 'pg';
 import { HistoryError, encodeHistoryCursor, historyPage } from '../src/application/history.js';
 import type { HistoryReader, HistoryList } from '../src/application/history.js';
@@ -65,6 +67,71 @@ async function httpFixture(
     },
   };
 }
+
+test('A6-01: malformed URL components fail safely before routing on a real listener', async (t) => {
+  let reads = 0;
+  const f = await httpFixture(t, {
+    listForPlayer: async () => {
+      reads++;
+      return empty;
+    },
+    findDetailForPlayer: async () => {
+      reads++;
+      return null;
+    },
+  });
+  f.server.get('/test-failure', async () => {
+    throw new Error('PRIVATE_INTERNAL_CONTEXT');
+  });
+  const address = new URL(await f.server.listen({ host: '127.0.0.1', port: 0 }));
+  for (const path of ['/history/%', '/history/%ZZ', '/history/%C0%AF', '/history/%ED%A0%80']) {
+    for (const headers of [
+      {},
+      { cookie: f.cookie },
+      { cookie: f.cookie, origin: 'http://evil.test' },
+      { cookie: f.cookie, origin: 'null' },
+    ]) {
+      // Supply the raw path to Node HTTP; no client-side URL normalization/decoding.
+      const response = await new Promise<{
+        status: number | undefined;
+        headers: IncomingHttpHeaders;
+        body: string;
+      }>((resolve, reject) => {
+        const outgoing = request(
+          { hostname: address.hostname, port: address.port, path, headers },
+          (incoming) => {
+            let body = '';
+            incoming.setEncoding('utf8');
+            incoming.on('data', (chunk: string) => {
+              body += chunk;
+            });
+            incoming.on('error', reject);
+            incoming.on('end', () =>
+              resolve({ status: incoming.statusCode, headers: incoming.headers, body }),
+            );
+          },
+        );
+        outgoing.on('error', reject);
+        outgoing.end();
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual(JSON.parse(response.body), { code: 'INVALID_REQUEST' });
+      assert.equal(response.headers['cache-control'], 'no-store');
+      assert.equal(response.headers['set-cookie'], undefined);
+      assert.ok(!response.body.includes(path));
+      assert.doesNotMatch(response.body, /FST_ERR|message|statusCode|player|session|question/);
+    }
+  }
+  assert.equal(reads, 0);
+  assert.equal((await fetch(`${address.origin}/health`)).status, 200);
+  const valid = await fetch(`${address.origin}/%68istory`, { headers: { Cookie: f.cookie } });
+  assert.equal(valid.status, 200);
+  assert.deepEqual(await valid.json(), empty);
+  assert.equal(reads, 1);
+  const failure = await fetch(`${address.origin}/test-failure`);
+  assert.equal(failure.status, 500);
+  assert.deepEqual(await failure.json(), { code: 'INTERNAL_ERROR' });
+});
 
 test('History cursor is canonical, bounded, versioned and strictly validated', () => {
   const position = { finishedAt: '2026-11-09T01:02:03.456Z', matchId: randomUUID() };

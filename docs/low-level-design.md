@@ -1338,6 +1338,22 @@ Conceptual access contracts:
   raw storage rows; log safe classifications only. Reuse the shared pool and existing
   bounded shutdown ownership; introduce no worker, migration, index or retry policy.
 
+Malformed URL-component decoding fails before route selection. The global router
+bad-URL handler returns only 400 `{ code: 'INVALID_REQUEST' }` with no-store, without
+echoing input, exposing router diagnostics, issuing cookies or forwarding to a route.
+This early rejection does not replace authentication/Origin checks on routed requests.
+
+History read integrity validation detects structural contradictions, existing schema
+constraint violations and missing required relationships/rows when provable from
+stored facts, plus score/rank/answer inconsistencies for which authoritative evidence
+is available. It does not prove that a structurally valid graph is unchanged after
+arbitrary direct SQL writes. For example, coherent removal of an unused trailing
+Choice or a non-Host participant and their results may leave another valid graph;
+the schema intentionally stores no independent original-cardinality manifest.
+This is an accepted M1 detection limitation (A6-02), distinct from atomic/idempotent
+application persistence. Continue rejecting detectable contradictions with safe 500;
+no tamper-evidence, additional schema, repair or reconciliation policy is implied.
+
 #### Approved authentication/session contract (Phase 4 Slice 2)
 
 - `POST /auth/login`: exact JSON username/password strings; 4 KiB body, ASCII
