@@ -4,8 +4,8 @@
 
 **Direction: Trivia — Modern Minimal Product UI.** This is the authoritative
 design reference for the future standalone Angular SPA in `frontend/`.
-It establishes presentation rules before bootstrap; it does not create an app,
-choose an Angular version, or change backend architecture or gameplay.
+It establishes approved M1 decisions and presentation rules before bootstrap;
+it does not create an app or change backend architecture or gameplay.
 
 [API contract](api-contract.md) owns actual HTTP and Socket.IO integration.
 [System design](system-design.md) owns architecture and M1 requirements;
@@ -19,6 +19,21 @@ Mandatory directions below are design decisions. All numeric design-token values
 and token names proposed below are **provisional examples**, to validate with real
 content and accessibility checks. No final brand palette or pixel-perfect screen
 design is approved here.
+
+## Approved M1 frontend decisions
+
+The product owner approved all seven discovery decisions below. They are the M1
+implementation baseline, not provisional proposals. Bootstrap remains separate work.
+
+| Decision | Approved scope |
+| --- | --- |
+| DEC-FE-01 — Framework and runtime | Angular 22 standalone SPA, TypeScript strict mode, SCSS + Modern CSS, and Node.js 26.13.0 LTS. Run Node/npm/Angular tooling in Docker without host `nvm`. Select the exact Angular patch at bootstrap after checking current compatibility and package availability. |
+| DEC-FE-02 — Development connectivity | Prefer a minimal same-origin HTTPS development proxy for authentication, History, Socket.IO polling, and WebSocket upgrades. Preserve cookies, browser Origin semantics, and backend security policies; never fake trusted HTTPS or rewrite Origin to bypass checks. Keep internal Docker addresses out of browser API URLs. Establish and verify hostname, ports, certificates, and trusted-proxy settings in Stage 1. |
+| DEC-FE-03 — Answer interaction | Deliberate tap/click or keyboard activation submits immediately, without a confirmation button. Focus alone never submits. Keep pending intent separate from confirmed selection, prevent duplicate dispatch, and preserve command identity for explicit uncertain-outcome retries. See interaction rules below. |
+| DEC-FE-04 — Score presentation | Display exact server-provided decimal-string score units, clearly labeled “Score units,” and supplied ranks including ties. No conversion, rounding, rescaling, or authoritative recalculation. Alternative notation requires a separately approved display policy. |
+| DEC-FE-05 — Launch theme | Light theme is the M1 default. Retain semantic tokens suitable for a future dark theme; no dark-theme switcher is required in M1. Brand colors remain provisional. Follow the Modern Minimal Product UI direction below. |
+| DEC-FE-06 — Live-Match navigation | Warn before leaving an active Match context without interpreting navigation as LeaveMatch or cancellation. Preserve the existing socket only where the supported lifecycle permits; never fabricate restored subscriptions. See navigation safeguards below. |
+| DEC-FE-07 — Disconnect and timed accessibility | Preserve accepted backend recovery and timing limits. Mark stale/disconnected state, disable unsupported offline actions, and offer only API-supported paths. Local timer zero never advances phases; FINISHED never confirms COMMIT. Evaluate time-sensitive accessibility without promising time extensions or WCAG compliance. |
 
 ## Product philosophy and visual language
 
@@ -100,12 +115,12 @@ border treatment, or state label. Icons must not require guessing their meaning.
 Muted text still needs adequate contrast. Verify status, hover, focus, selected,
 and error combinations in each supported theme.
 
-Support light and dark themes architecturally through semantic CSS custom
-properties and a small root-level theme override. Components consume roles rather
-than hard-coded light/dark colors. Theme preference, default, and any user-facing
-switch remain scope-discovery decisions. Do not build a theme service, persistence
-scheme, or customization UI before a demonstrated need. Never simulate a dark
-theme by reducing opacity or inverting the rendered page.
+Use light theme by default for M1 (DEC-FE-05). Components consume semantic CSS
+custom properties rather than hard-coded light/dark colors, allowing future dark
+theme mappings through a small root-level override. A dark-theme switcher is not
+required in M1. Do not build a theme service, persistence scheme, or customization
+UI before a demonstrated need. Never simulate a dark theme by reducing opacity
+or inverting the rendered page.
 
 ## Interaction and feedback
 
@@ -123,12 +138,16 @@ theme by reducing opacity or inverting the rendered page.
 | Confirmation dialog | Use only for a consequential supported action needing confirmation. Name the consequence and action; avoid routine confirmation for answers or navigation. Never imply that closing a page cancels or leaves an active Match. |
 | Focus and keyboard | Keep logical DOM order, visible focus, and native keyboard behavior. Preserve focus during pending operations; after navigation/dialog closure place it at a sensible heading or initiating control. |
 
-For answers, choose native semantics to match the eventual submission flow.
-A staged single-choice form can use labeled radios within a fieldset; do not
-attach network submissions to mere focus movement. If activation submits
-immediately, labeled buttons with an exposed selection state may be more suitable.
-Decide that flow during scope discovery and verify keyboard behavior; do not mix
-radio selection, focus, and server acceptance into one ambiguous state.
+Answer choices use labeled native buttons with an exposed server-confirmed
+selection state. Under DEC-FE-03, deliberate activation immediately submits one
+answer intent; there is no separate confirmation button. Keyboard focus alone
+never submits. Prevent accidental duplicate dispatch while an intent is unresolved,
+and distinguish the pending choice from the last server-confirmed selection.
+Show confirmed attempt state clearly; answer changes follow the server's existing
+attempt rules. An uncertain-outcome retry preserves the original command ID and
+payload, and historical ACKs cannot override a newer MatchSnapshot. Never claim
+acceptance from a click, automatically resubmit, queue offline commands, or make
+local answer state authoritative. See the [API contract](api-contract.md#6-gameplay-lifecycle-and-answer-rules).
 
 During `QUESTION_OPEN`, prioritize the question, equal answer targets, a compact
 timer/progress area, and the viewer's submission state. Do not reveal correctness
@@ -136,6 +155,20 @@ early. During `REVEAL`, clearly label the correct answer, the viewer's accepted
 choice or no answer, and the server-provided result. During `FINISHED`, show final
 standings, shared winners where applicable, and access to History without extra
 metric panels. A local animation never confirms a backend change.
+
+## Live-Match navigation safeguards
+
+Under DEC-FE-06, warn before leaving an active Match context: participation may
+not be recoverable in M1. Use an Angular route-deactivation safeguard where
+applicable. Browser refresh/close warnings are browser-limited; do not guarantee
+that navigation can always be prevented. Navigation does not implicitly dispatch
+`LeaveMatch`, remove membership, or cancel the Match.
+
+Preserve the existing Socket.IO session across internal navigation only where its
+supported lifecycle permits. A retained current connection and subscription are
+different from a replaced socket or reloaded page. Revisiting a route must not
+fabricate a restored subscription; no active-Match resume is authorized. Follow
+the [disconnect contract](api-contract.md#9-disconnect-restart-and-persistence-visibility).
 
 ## Responsive behavior by task
 
@@ -179,7 +212,7 @@ these guidelines are not a claim of implemented or verified compliance.
 - Use semantic landmarks, a logical heading hierarchy, native controls, and
   descriptive accessible names. Prefer HTML semantics before custom ARIA.
 - Support every action by keyboard without traps or pointer-only/hover-only
-  content. Ensure visible focus in both themes and keep focused controls
+  content. Ensure visible focus in every supported theme and keep focused controls
   unobscured. Provide a skip link when repeated navigation warrants it.
 - Meet at least `4.5:1` contrast for normal text and `3:1` for qualifying large
   text; meaningful control boundaries and state indicators need `3:1` against
@@ -203,17 +236,22 @@ these guidelines are not a claim of implemented or verified compliance.
 - Verify manually with keyboard, zoom, touch, reduced-motion settings, and screen
   readers alongside automated checks once components exist.
 
-Timed-game accessibility needs explicit review during scope discovery. The fixed
-server window is not adjustable by frontend design. Do not assume a WCAG timing
-exception or promise extended time; identify any unmet requirement for a separately
-approved product/backend decision. The broader accessibility scope remains open
-in the registry; this task establishes frontend expectations without changing rules.
+Under DEC-FE-07, implementation verification must include keyboard input, visible
+focus, semantic controls and announcements, screen-reader behavior, mobile touch,
+zoom/text resizing, reduced motion, and time-sensitive gameplay interaction.
+The ten-second server window remains unchanged. Whether the resulting timed-game
+experience meets applicable accessibility requirements remains unverified; do not
+assume a WCAG timing exception, promise extended time, or claim that frontend-only
+improvements establish full WCAG 2.2 AA compliance. Record unmet requirements for a
+separately approved product/backend decision. Broader accessibility scope remains
+open in the registry.
 
 ## Angular styling architecture and tokens
 
 **Use SCSS + Modern CSS.** Keep presentation primarily in each component's SCSS
-file with Angular's default Emulated style encapsulation. No Angular app/version
-exists yet; choose version-dependent APIs at bootstrap, not in these guidelines.
+file with Angular's default Emulated style encapsulation. Angular 22 is approved;
+the app is not bootstrapped yet. Verify exact patch compatibility and select
+version-dependent APIs at bootstrap.
 
 - Use semantic class names describing the component's parts and states. Keep
   templates focused on structure and behavior, with readable class/state bindings.
@@ -286,9 +324,10 @@ and transport configuration; do not duplicate or extend the API here.
   payload. Do not introduce unlimited automatic retries or wait for a new version
   as the only way to resolve a no-op's pending indicator.
 - **Scoring:** render supplied results and ranks. Never calculate authoritative
-  awards or break ties locally. Preserve exact decimal-string score units; avoid
-  unsafe numeric conversion. Human-facing decimal formatting remains deferred
-  (DEF-005); choose no rounding/points convention in this document.
+  awards or break ties locally. Under DEC-FE-04, display the exact decimal-string
+  score units labeled “Score units,” without rounding, rescaling, or implicit
+  decimal-point conversion. Human-facing decimal conversion remains deferred
+  (DEF-005); any alternative notation requires a separately approved display policy.
 - **Timers:** client countdowns present server deadlines and may be affected by
   clock skew. Zero does not change phase, reveal correctness, or guarantee that an
   answer was rejected. Wait for authoritative snapshots; never add Next, Skip,
@@ -296,7 +335,8 @@ and transport configuration; do not duplicate or extend the API here.
 - **Disconnects:** transport reconnection does not restore a subscription. M1 has
   no active-state fetch or resume operation; cached Create/Join receipts do not
   restore delivery. Present lost connection/unsupported resume clearly. Do not
-  infer membership removal, Host transfer, penalties, or a reconnect workaround.
+  automatically restore subscriptions or allow unsupported offline gameplay actions.
+  Do not infer membership removal, Host transfer, penalties, or a reconnect workaround.
   Restart loses sessions and active Matches; committed History remains available
   after login. A stalled timer has no approved client recovery policy.
 - **Completion:** `FINISHED` gives the final live outcome, not durable History
@@ -310,11 +350,13 @@ and transport configuration; do not duplicate or extend the API here.
   must not identify unauthorized Matches. Render names/question text as plain
   text; do not leak private snapshots across accounts, persistent caches, or logs.
 
-Some baseline diagrams describe future recovery or older disconnect behavior;
-these are not implemented capabilities. The API contract documents current M1
-limitations and ACK shorthand gaps. If a future screen needs an ambiguous or absent
-capability, record the question and obtain a decision before implementing that
-dependent flow; do not reinterpret a diagram as permission to redesign the backend.
+Some baseline diagrams describe future recovery; it is not an implemented
+capability. [System Design requirement 5](system-design.md#3-functional-requirements)
+clarifies accepted M1 disconnect behavior and supersedes older disconnect-removal
+wording. The API contract documents current M1 limitations and ACK shorthand gaps.
+If a future screen needs an ambiguous or absent capability, record the question
+and obtain a decision before implementing that dependent flow; do not reinterpret
+a diagram as permission to redesign the backend.
 
 ## Explicitly prohibited patterns
 
@@ -330,17 +372,22 @@ motion without functional value, and dashboard-like clutter. Prefer solid
 backgrounds, restrained borders/shadows, and deliberate spacing. The styling and
 dependency restrictions above apply equally to shared and feature components.
 
-## Open choices and next step
+## Discovery closure and next step
 
-Frontend scope discovery should resolve the final brand palette, light/dark launch
-coverage and preference behavior, answer activation/submission flow, score display
-format, detailed navigation, and timed-game accessibility review. Confirm deployment
-origins and safe connection/unknown-outcome copy against the existing contract.
-Validate provisional typography, spacing, breakpoints, and shapes using real content.
-These choices do not block this reference and do not authorize backend extensions.
+All seven product decisions are approved above. Remaining design choices are the
+final brand palette and refinement of provisional typography, spacing, breakpoints,
+and shapes using real content. Detailed navigation and connection/unknown-outcome
+copy must follow the approved safeguards and existing API contract.
 
-This document is ready to guide frontend scope discovery. Bootstrap, screen designs,
-dependencies, and UI implementation are separate work.
+Stage 1 Angular Bootstrap establishes the exact Angular patch and verifies the
+same-origin HTTPS proxy, origins, ports, certificates, and narrow trusted-proxy
+settings. These are implementation verification gates, not unresolved approvals of
+the seven decisions. Timed-game accessibility limitations must be evaluated and
+reported during implementation; no timing change is authorized.
+
+The documentation baseline is ready for Stage 1 planning and owner review.
+Bootstrap, dependencies, screen designs, and UI implementation require a separate
+authorized task.
 
 ## Practical component review
 

@@ -248,6 +248,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Evidence:** [AGENTS Scope/Structure](../AGENTS.md); [boundary notes](../backend/src/README.md); [HLD §19](HLD_Component_Diagram.md#19-dependency-direction).
 - **Concern:** AGENTS still says no gameplay/authentication/schema; some boundary descriptions refer to earlier phases and NestJS remains in complementary docs.
 - **Policy / status:** System §20 and approved stack use Fastify; current code supplies gameplay and identity.
+- **Documentation alignment:** Frontend discovery closure corrected [System requirement 5](system-design.md#3-functional-requirements) to distinguish explicit Leave membership removal from disconnect subscription cleanup. Older disconnect-removal wording remains in [LLD §6.1](low-level-design.md#61-create--join-match) and [§9.2](low-level-design.md#92-match-engine-unit-tests), outside that closure's authorized edits; System requirement 5 explicitly supersedes it for accepted M1. Align those historical passages in a separately authorized documentation patch, without changing behavior.
 - **Impact:** Future contributors may underestimate existing behavior or choose obsolete terminology.
 - **Next action:** Request a focused guidance refresh; preserve authoritative contracts and ownership.
 - **Related:** —.
@@ -340,7 +341,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Component / phase:** Lobby/gameplay; Phase 1 onward. **Target:** future design.
 - **Evidence:** [System §5](system-design.md#5-important-open-questions); [LLD §10.2](low-level-design.md#102-explicitly-deferred); [lobby tests](../backend/tests/match-engine.test.ts).
 - **Concern:** Host leave returns unsupported; active disconnect/reconnect/leave policy is unresolved.
-- **Policy / status:** No automatic Host transfer, grace period or replacement bot.
+- **Policy / status:** Accepted M1 disconnect removes the affected socket's subscriptions, not Match membership; it does not invoke LeaveMatch. Reconnection does not restore subscriptions. No automatic Host transfer, grace period or replacement bot. [Gateway](../backend/src/transport/lobby-gateway.ts) and [lobby/replay tests](../backend/tests/lobby.test.ts) establish current behavior; broader departure/recovery policy remains OPEN.
 - **Impact:** Transport disconnects, including auth expiry, cannot silently authorize gameplay membership changes.
 - **Next action:** Obtain explicit gameplay policy before implementing departure/recovery; Slice 2 reconnect authenticates only.
 - **Related:** DEC-002, DEC-012.
@@ -570,6 +571,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Evidence:** [LLD §10.2](low-level-design.md#102-explicitly-deferred); [HLD §21](HLD_Component_Diagram.md#21-future-extension-boundaries).
 - **Concern:** Bots/tournament orchestration and human-facing decimal formatting are deferred.
 - **Policy / status:** Extensions must preserve pure Engine authority and exact bigint equality.
+- **Frontend display decision:** Approved [DEC-FE-04](frontend-design-guidelines.md#approved-m1-frontend-decisions) requires exact decimal-string score units labeled “Score units” and server-provided ranks/ties. This does not approve decimal conversion, rescaling, rounding, or alternative notation; those remain deferred pending a separate display policy.
 - **Impact:** Does not prevent current deterministic Engine/demo verification.
 - **Next action:** Design when needed; no replacement bots or rounding changes.
 - **Related:** —.

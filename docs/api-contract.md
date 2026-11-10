@@ -99,7 +99,12 @@ Send exactly two JSON properties, both strings:
   Maximum login JSON body is 4096 bytes.
 - Username: ASCII letters, digits, `_`, `-`, `.`, length 1–128 UTF-8 bytes.
   Identity is case-insensitive through lowercase canonicalization. No trimming:
-  `Alice` and `ALICE` resolve like `alice`; `alice` is invalid.
+  `Alice`, `ALICE`, and `alice` are valid and canonicalize to `alice`.
+  Empty strings, leading/trailing spaces (e.g. `" alice"` or `"alice "`), `é`,
+  `a@b`, and strings longer than 128 characters are invalid. These ASCII bounds
+  count characters and UTF-8 bytes identically; frontend validation must not add
+  restrictions. See the [validator](../backend/src/application/player-identity.ts)
+  and [existing validation tests](../backend/tests/login.test.ts).
 - Password: 1–1024 UTF-8 bytes. Preserve exact input; never trim, normalize or
   lowercase it. These are login resource bounds, not password-creation policy.
 - Unknown user and wrong password share 401 `INVALID_CREDENTIALS`. Infrastructure

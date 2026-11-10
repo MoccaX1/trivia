@@ -96,7 +96,19 @@ The current product baseline requires the system to:
 
 4. Allow additional Players to join while the Match is in `WAITING`, up to a maximum of 10 participants.
 
-5. Remove a non-Host participant who leaves or disconnects during `WAITING` and notify remaining lobby clients; retain no ghost participant and insert no bot.
+5. Remove a non-Host participant after an accepted explicit `LeaveMatch` during
+   `WAITING` and notify remaining authorized lobby clients; insert no bot.
+   Match membership and socket publication subscriptions are distinct: disconnect
+   removes that socket's subscriptions, but does not invoke `LeaveMatch` or remove
+   the Player from Match membership. Reconnection does not restore subscriptions;
+   active-Match resume remains unsupported in M1. See the
+   [implemented disconnect contract](api-contract.md#9-disconnect-restart-and-persistence-visibility).
+
+   Earlier baseline disconnect-driven removal descriptions, including
+   [LLD §6.1](low-level-design.md#61-create--join-match) and
+   [LLD §9.2](low-level-design.md#92-match-engine-unit-tests), are superseded for
+   accepted M1 behavior. Automatic removal on disconnect would require a separately
+   approved departure policy; future departure/reconnect decisions remain open.
 
 6. Allow only the Host to start a Match.
 
