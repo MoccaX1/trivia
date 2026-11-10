@@ -1240,8 +1240,11 @@ true cross-site credentialed deployment is excluded. Safe read-only GET /auth/pr
 and the approved GET /history and GET /history/:matchId routes
 permit absent Origin without Referer, but validate every present Origin and reject
 null/disallowed values. Each still requires a session, never refreshes idle and uses
-no-store. Login/logout and all Socket.IO handshakes require Origin. Production fails closed without
-HTTPS/origin configuration. Browser Origin checks also cover WebSocket handshakes.
+no-store. Login/logout, polling POST, and WebSocket handshakes require Origin.
+Only session-authenticated same-origin polling GET behind a trusted HTTPS proxy
+has the narrow missing-Origin/Fetch Metadata exception defined in
+[API §4](api-contract.md#4-socketio-connection-and-subscriptions).
+Production fails closed without HTTPS/origin configuration.
 
 Authentication must be valid immediately before Coordinator admission; no asynchronous
 gap is allowed between the final check and admission. Later expiration/logout does

@@ -1,0 +1,24 @@
+@use './styles/tokens';
+* {
+  box-sizing: border-box;
+}
+html {
+  color-scheme: light;
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 100%;
+  line-height: 1.5;
+}
+body {
+  margin: 0;
+}
+:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-feedback: 0ms;
+  }
+}

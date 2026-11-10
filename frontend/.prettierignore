@@ -1,0 +1,6 @@
+node_modules
+dist
+.angular
+.certs
+test-results
+package-lock.json

@@ -1,0 +1,26 @@
+// Provisional palette; semantic roles allow future theme mappings.
+:root {
+  --color-background: #fafbfc;
+  --color-surface: #ffffff;
+  --color-text: #182230;
+  --color-text-secondary: #526174;
+  --color-border: #dce2e9;
+  --color-accent: #2457be;
+  --color-on-accent: #ffffff;
+  --color-focus: #2457be;
+  --font-body: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --text-small: 0.875rem;
+  --text-body: 1rem;
+  --text-large: 1.25rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 4rem;
+  --radius-small: 0.375rem;
+  --focus-width: 2px;
+  --focus-offset: 4px;
+  --motion-feedback: 120ms;
+}

@@ -1,0 +1,9 @@
+node_modules
+dist
+.angular
+.certs
+.env
+.env.*
+test-results
+.git
+.vscode

@@ -274,8 +274,33 @@ Login before connecting. Use the same configured backend host for HTTP and socke
 Both polling and WebSocket are supported; normal Socket.IO clients may begin with
 polling then upgrade. Browser cookies accompany the connection; no bearer token or
 Player ID is supplied in handshake `auth`/query. WebSocket Origin checks are explicit
-server checks, not merely browser CORS. Missing/null/disallowed Origin is rejected
-on handshake and subsequent transport requests; the safe-GET exceptions do not apply.
+server checks, not merely browser CORS. Every present Origin must be allowlisted;
+empty, `null`, and disallowed values reject without fallback. POST and WebSocket
+requests still require Origin. The HTTP safe-GET exceptions do not apply to sockets.
+
+**Narrow same-origin polling GET compatibility:** browsers can omit Origin on
+same-origin XHR GETs. Only an Origin-absent GET to `/socket.io/` with exactly one
+`EIO=4` and one `transport=polling` is eligible, with all of these requirements:
+
+- Secure cookie policy, an explicitly trusted proxy peer, and forwarded HTTPS
+  validated by that peer's IP/CIDR. Native TLS alone or HTTP loopback mode does
+  not enable this exception; arbitrary forwarding headers cannot establish trust.
+- No Upgrade header; `Sec-Fetch-Site: same-origin`, `Sec-Fetch-Mode: cors`, and
+  `Sec-Fetch-Dest: empty`, all present and exact.
+- Host equals the configured public Origin's authority; Referer has that exact
+  HTTPS Origin without embedded credentials; the public Origin is allowlisted.
+- A valid unexpired/unrevoked session cookie on every eligible GET, including
+  subsequent polls with an Engine.IO sid. This check does not refresh idle.
+
+Missing/inconsistent metadata or Referer, `same-site`/`cross-site`/`none`, and
+untrusted direct clients fail closed. This is not a blanket missing-Origin policy
+or a Referer-only rule. Fetch Metadata is browser context, not identity: a
+non-browser client can forge it, but still needs the trusted HTTPS path and a valid
+session (as it already needs credentials when supplying an allowed Origin).
+Cross-site browser scripts cannot choose the forbidden `Sec-*` headers; cookie
+semantics and existing session authorization remain unchanged. Proxies must preserve
+Origin and Fetch Metadata rather than manufacture them. Browsers/referrer policies
+that omit the required evidence cannot use this missing-Origin path.
 
 ```ts
 import { io } from 'socket.io-client';

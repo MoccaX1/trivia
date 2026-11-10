@@ -20,7 +20,7 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 
 | Category | OPEN | ACCEPTED | RESOLVED | Total |
 |---|---:|---:|---:|---:|
-| BUG | 0 | 0 | 6 | 6 |
+| BUG | 0 | 0 | 7 | 7 |
 | LIM | 0 | 4 | 0 | 4 |
 | RISK | 1 | 0 | 4 | 5 |
 | DEBT | 2 | 0 | 0 | 2 |
@@ -29,7 +29,7 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 | OPS | 2 | 0 | 1 | 3 |
 | DEF | 0 | 2 | 3 | 5 |
 
-Total: **43** records; **6 ACCEPTED**, **16 OPEN**, **21 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **44** records; **6 ACCEPTED**, **16 OPEN**, **22 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
@@ -138,7 +138,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 - **Category / status:** OPS / OPEN. **Severity / priority:** HIGH / UNDECIDED.
 - **Component / phase:** Deployment; bootstrap/Phase 4. **Target:** before public deployment.
-- **Evidence:** [Compose](../docker-compose.yml); [environment example](../backend/.env.example); [README Docker workflow](../README.md).
+- **Evidence:** [Compose](../compose.backend.yml); [environment example](../backend/.env.example); [README Docker workflow](../README.md).
 - **Concern:** Compose exposes loopback ports with local example credentials; no production TLS termination/session deployment contract is provided.
 - **Policy / status:** Current workflow is local development; database URLs are explicit and secrets must stay out of logs/Git.
 - **Impact:** Copying development settings into public deployment would expose unsuitable credentials or transport configuration.
@@ -303,6 +303,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Evidence:** [Slice 2 contract](low-level-design.md#57-http-api); [authentication tests](../backend/tests/authentication.test.ts); [session tests](../backend/tests/sessions.test.ts); [LLD §§5.2,5.7](low-level-design.md#52-realtime-command-envelope); [server](../backend/src/transport/server.ts); [System §17](system-design.md#17-security-and-fairness).
 - **Concern (historical baseline before Slice 2):** Transport mechanism, route DTOs, browser origins, cookie attributes and handshake protection remain unspecified.
 - **Policy / status:** Approved Slice 2: HTTPS __Host cookie, strict configured Origin/JSON demo CSRF posture, same-site credentialed CORS, explicit trusted proxies, actual-loopback development exception; polling and WebSocket authenticate server-session identity. Approved safe-GET clarification: /auth/profile allows absent Origin without Referer; present null/disallowed origins reject. Sessions, no idle refresh and no-store remain mandatory. POST login/logout and Socket.IO keep mandatory Origin. No frontend topology is selected.
+- **Stage 1 compatibility clarification:** That Slice 2 summary is historical. Approved [BUG-007](#bug-007) adds only the trusted-HTTPS, metadata-validated, session-authenticated polling GET exception to mandatory Socket.IO Origin. POST/WebSocket retain Origin requirements; [DEC-FE-02](frontend-design-guidelines.md#approved-m1-frontend-decisions) selects the same-origin HTTPS development proxy. Cookie/session semantics are unchanged.
 - **Impact:** Unsafe browser defaults could enable credential theft, request forgery or unauthorized socket access.
 - **Next action:** Preserve regression coverage and the approved contract; related deferred integration remains separate.
 - **Related:** DEC-001, OPS-002.
@@ -673,6 +674,18 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 - **Impact:** Early malformed-URL failures now honor the safe HTTP error envelope and cache contract globally.
 - **Next action:** Preserve early-router and existing S2-01/History regressions.
 - **Related:** BUG-004, LIM-004, TEST-004.
+
+<a id="bug-007"></a>
+
+### BUG-007 — Same-origin browser polling omitted required Origin
+
+- **Category / status:** BUG / RESOLVED. **Severity / priority:** MEDIUM / UNDECIDED.
+- **Component / phase:** Socket.IO transport policy; frontend Stage 1 remediation.
+- **Root cause:** Chromium same-origin polling GETs sent Cookie/Referer and Fetch Metadata but omitted Origin. Engine.IO middleware rejected them before Socket.IO session authentication; direct WebSocket still worked.
+- **Approved correction:** [API §4](api-contract.md#4-socketio-connection-and-subscriptions) defines a narrow GET-only exception behind trusted HTTPS forwarding, requiring exact same-origin metadata, public Host/Referer agreement, and a valid session on every GET. Present null/disallowed Origins, POST/upgrade exceptions, untrusted peers, missing/inconsistent context and invalid sessions still reject. No Origin synthesis or cookie/session policy change.
+- **Evidence:** [policy](../backend/src/transport/auth-policy.ts), [Engine.IO integration](../backend/src/transport/server.ts), [26 real-listener security regressions](../backend/tests/socket-origin.test.ts), and [Chromium smoke](../frontend/scripts/browser-smoke.mjs).
+- **Verification:** Full Docker backend suite with disposable PostgreSQL: **262 passed / 0 failed / 0 skipped** (236 existing plus 26 new). Chromium observed accepted polling GET/POST, polling-to-WebSocket upgrade, direct WebSocket and logout invalidation; opaque/null, disallowed same-site and cross-site browser Origins rejected. See [execution evidence](../frontend/README.md#remediation-verification).
+- **Limitations:** Fetch Metadata is not identity or cryptographic proof; non-browser clients still need a valid session and trusted HTTPS path. Missing required browser/referrer evidence fails closed. Active-Match recovery remains unsupported.
 
 ## 10. Historical coverage and evidence limitations
 

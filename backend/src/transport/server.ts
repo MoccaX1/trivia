@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from 'socket.io';
 import { installAuthentication } from './authentication.js';
 import type { Authentication } from './authentication.js';
-import { allowedOrigin, secureRequest } from './auth-policy.js';
+import { allowedOrigin, allowedSocketRequest, sessionToken } from './auth-policy.js';
 import { installLobbyGateway } from './lobby-gateway.js';
 import type { LobbyRuntime } from './lobby-gateway.js';
 import type { MatchCompletions } from '../application/match-completions.js';
@@ -57,24 +57,21 @@ export function createServer({
       allowedHeaders: ['Content-Type'],
     },
     allowRequest: (request, callback) =>
-      callback(
-        null,
-        !!auth &&
-          allowedOrigin(auth.policy, request.headers.origin) &&
-          secureRequest(auth.policy, request),
-      ),
+      callback(null, !!auth && allowedSocketRequest(auth.policy, request)),
   });
   // Engine.IO middleware also covers subsequent polling/upgrade requests, where
   // allowRequest alone only protects initial connection establishment.
   realtime.engine.use(
     (request: IncomingMessage, _response: ServerResponse, next: (error?: Error) => void) => {
-      if (
-        !auth ||
-        !allowedOrigin(auth.policy, request.headers.origin) ||
-        !secureRequest(auth.policy, request)
-      )
+      if (!auth || !allowedSocketRequest(auth.policy, request))
         return next(new Error('ORIGIN_FORBIDDEN'));
-      next();
+      if (request.headers.origin !== undefined) return next();
+      // The narrow metadata exception additionally requires a live session on
+      // every GET (including existing Engine.IO sids), without refreshing idle.
+      void auth.sessions
+        .resolve(sessionToken(request.headers.cookie, auth.policy))
+        .then((player) => next(player ? undefined : new Error('UNAUTHENTICATED')))
+        .catch(() => next(new Error('AUTH_UNAVAILABLE')));
     },
   );
   http.setErrorHandler((error, request, reply) => {

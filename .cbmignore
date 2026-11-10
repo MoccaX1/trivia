@@ -79,3 +79,6 @@ build/
 /.git/
 /.codex/
 /.aws/
+
+/frontend/.certs/
+/frontend/test-results/

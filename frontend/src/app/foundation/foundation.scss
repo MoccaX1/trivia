@@ -1,0 +1,28 @@
+:host {
+  display: block;
+}
+.foundation {
+  max-width: 52rem;
+}
+.intro {
+  color: var(--color-accent);
+  font-weight: 600;
+  margin-block: 0 var(--space-5);
+}
+h1 {
+  font-size: clamp(2.5rem, 6vw + 1rem, 5.5rem);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+  margin-block: 0 var(--space-6);
+  overflow-wrap: anywhere;
+}
+.description {
+  font-size: var(--text-large);
+  margin-block: 0 var(--space-2);
+}
+.note {
+  max-width: 42ch;
+  color: var(--color-text-secondary);
+  margin: 0;
+}

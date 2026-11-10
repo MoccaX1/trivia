@@ -1391,12 +1391,17 @@ no tamper-evidence, additional schema, repair or reconciliation policy is implie
   two approved History routes: absent
   Origin is allowed without Referer, while present null/disallowed origins reject.
   Session authentication, read-only behavior, no idle refresh and no-store remain
-  mandatory. Login/logout and all Socket.IO handshakes still require Origin. Credentialed preflight supports approved same-site
+  mandatory. Login/logout, polling POST, and WebSocket require Origin. The narrow
+  session-authenticated polling GET exception behind trusted HTTPS forwarding uses
+  exact same-origin Fetch Metadata and Host/Referer agreement; see
+  [API §4](api-contract.md#4-socketio-connection-and-subscriptions).
+  Credentialed preflight supports approved same-site
   cross-origin deployments, with no assumed frontend topology. Secure mode uses
   public-suffix-aware schemeful site validation and rejects cross-site configurations.
   HTTPS and Origin configuration are mandatory; trust forwarded IP/TLS only through
   explicit configured trusted-proxy addresses. Both polling and WebSocket enforce
-  Origin and cookie authentication; client handshake identity fields are not authority.
+  the documented Origin/context policy and cookie authentication; client handshake
+  identity fields are not authority.
 - Sliding 15-minute limits: 60 login attempts/trusted client IP, 10 credential failures
   per canonical username. Unknown usernames count; success never erases history and
   database outages do not count as credential failures. 429 RATE_LIMITED for limits.

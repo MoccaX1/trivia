@@ -1,0 +1,243 @@
+# Trivia frontend — Stage 1
+
+Angular 22 foundation only: a routed shell, light-theme SCSS tokens, Docker tooling,
+and local HTTPS integration. No authentication UI/state, lobby, gameplay, or History
+screens exist. Follow [design guidelines](../docs/frontend-design-guidelines.md)
+and the [API contract](../docs/api-contract.md).
+
+## Versions and checks
+
+Pinned framework/compiler 22.2.5, CLI/build 22.2.6, TypeScript 6.0.3, RxJS 7.8.2,
+Node 26.13.0, npm 11.20.0. Angular 22 supports Node 26 and TypeScript >=6.0 <6.1:
+[official compatibility](https://angular.dev/reference/versions).
+Direct package versions and the frontend lockfile are pinned; all Node/npm/CLI
+commands run in Docker at `/app`, independently of backend dependencies.
+
+## Local development
+
+Run these commands from the repository root. The overlay reuses the existing
+backend/PostgreSQL services with their existing orchestration. The only backend
+behavior change is the narrow polling GET compatibility policy documented below.
+Prepare the existing untracked `backend/.env` using the root README if necessary.
+
+```sh
+# Convenience function for this shell only.
+dc() {
+  docker compose --env-file backend/.env -f compose.backend.yml -f compose.frontend.yml "$@"
+}
+docker build --target development -t trivia-frontend-dev frontend
+# Creates ignored local CA/server keys, refusing to overwrite existing certificates.
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/frontend:/app" -w /app \
+  trivia-frontend-dev sh scripts/certificates.sh
+```
+
+The image includes OpenSSL; host Node, Angular CLI, nvm, and mkcert are unnecessary.
+
+Trust **only the public `frontend/.certs/ca.pem`** in your development browser/OS
+certificate store before browsing. Never import or share `ca-key.pem` or the server
+private key. The leaf certificate covers `localhost` and expires after 90 days;
+the CA expires after 365 days. Renewal is an explicit local operation: remove only
+your expired generated leaf/CSR/serial files and rerun certificate generation after
+reviewing the script, or generate a fresh CA and update local trust. The script
+refuses automatic replacement. Keep all `.certs` material out of Git and the graph.
+
+```sh
+dc build backend frontend
+dc up -d --wait postgres
+# Existing versioned migrations; apply only to your intended development database.
+dc --profile tools run --rm tools npm run migrate
+dc run --rm --no-deps frontend npm ci
+dc up -d --wait backend frontend
+dc ps
+# Open https://localhost:4200/ after trusting the CA.
+```
+
+The frontend dependency volume is separate from backend and host dependencies.
+After changing package files, stop frontend, rebuild its image, run `npm ci` in its
+volume, then recreate it. Images run tooling as the `node` user (UID/GID 1000);
+adapt local bind-mount ownership for other host IDs. Normal file watching uses
+bind-mount events; append `--poll=1000` to `npm start` only if events are unavailable.
+For a future live demo use `npm run start:demo` to disable automatic full reload/HMR;
+a refresh cannot restore an active Match subscription.
+
+## HTTPS boundary and routing
+
+Confirmed local values: browser Origin `https://localhost:4200`; Angular's internal
+HTTP listener `127.0.0.1:4201`; backend target `http://backend:3000`.
+Only port 4200 is published for frontend, bound to host loopback. Do not substitute
+`127.0.0.1` in the browser URL. Internal addresses never enter browser API URLs.
+
+The preferred Angular proxy was tested first. Angular 22.2.6's component middleware
+calls `decodeURIComponent` before its proxy and returns an HTML stack trace for
+`/history/%ZZ`. The justified fallback is a small HTTPS gateway in the **same
+frontend container**, using `http-proxy`; no additional service is introduced.
+It proxies auth, History (including roots/query strings), and Socket.IO before
+Angular. Other paths reach Angular. Invalid URL encoding receives safe no-store
+400 JSON. Backend URLs are otherwise forwarded unchanged.
+
+The gateway preserves Origin/cookies/Host, strips client-supplied `Forwarded` and
+`X-Forwarded-*`, and derives forwarding data only from the actual TLS connection.
+Backend secure-cookie mode remains enabled. The dedicated `172.30.47.0/29` network
+assigns frontend `172.30.47.2`, backend `172.30.47.3`; backend trusts **only
+172.30.47.2/32**. Check for network conflicts before startup. If changing these
+values, keep subnet, addresses, trusted peer, Origin, port, and certificate SANs
+consistent. Do not broaden proxy trust or rewrite/synthesize Origin.
+
+This is development tooling, not production deployment infrastructure. Certificate
+verification is never globally disabled. Direct requests from untrusted peers with
+forged forwarding headers remain rejected. The underlying backend port mapping,
+if enabled by root Compose, does not bypass its HTTPS enforcement.
+
+## Verification commands
+
+```sh
+dc exec frontend node --version
+dc exec frontend npm --version
+dc exec frontend npm exec ng version
+dc exec frontend npm run check
+# Individual scripts: typecheck, test, lint, format:check, build.
+# Production assets: frontend/dist/trivia/browser (static SPA, no SSR).
+dc logs frontend backend
+dc stop
+```
+
+`typecheck` uses Angular compiler strict/template checks. `test` runs two shell/router
+foundation tests with CLI-default Vitest and three Node proxy-boundary regressions;
+it does not establish future feature correctness. Build also compiles strict templates.
+ESLint covers TypeScript, Angular HTML accessibility, and tooling JavaScript.
+Prettier checks source/configuration/docs. Install audit currently reports ten Moderate
+ESLint/minimatch tooling findings, no High/Critical; no forced downgrade/override was
+applied. Re-evaluate compatible fixes before expanding tooling exposure.
+
+## Real-browser transport smoke
+
+Same-origin polling is supported by the narrow, session-authenticated GET exception
+in [API §4](../docs/api-contract.md#4-socketio-connection-and-subscriptions). Behind the
+explicitly trusted HTTPS proxy it requires exact same-origin Fetch Metadata and
+public Host/Referer agreement. It is not a blanket missing-Origin allowance. POST
+and WebSocket still require an allowlisted Origin; null/disallowed values reject.
+The gateway does not add or rewrite Origin or Fetch Metadata. Session resolution
+on eligible GETs never refreshes idle. Clients lacking the required evidence fail closed.
+
+The smoke verifies trusted TLS, root/fallback routing, desktop/mobile layout,
+keyboard skip/focus, reduced motion, unauthenticated profile/History, safe malformed
+URLs, browser-stored Secure/HttpOnly/SameSite=Lax session cookies, login/profile/History,
+authenticated polling GET/POST, polling-to-WebSocket upgrade, direct WebSocket,
+logout invalidation/socket disconnect, and anonymous, null/opaque, disallowed
+same-site and cross-site Origin rejection. No Match commands or subscriptions are
+created. Wire headers are captured using CDP and logged with cookie values redacted.
+
+Use a controlled pre-provisioned disposable account and an outside-repository JSON
+file containing exactly username/password. Do not embed credentials in source or
+committed configuration. Provisioning remains internal; the root README describes
+migration and identity prerequisites. The test is not a Login UI or provisioning API.
+
+```sh
+docker build --target browser -t trivia-frontend-browser frontend
+# Set SMOKE_DIR to a private directory containing credentials.json, then:
+mkdir -p frontend/test-results
+docker run --rm --network "container:$(dc ps -q frontend)" \
+  -e SMOKE_CREDENTIALS=/smoke/credentials.json \
+  -v "$SMOKE_DIR:/smoke:ro" \
+  -v "$PWD/frontend/.certs:/app/.certs:ro" \
+  -v "$PWD/frontend/test-results:/app/test-results" \
+  trivia-frontend-browser
+```
+
+The browser target uses Node 26 and Chromium; it imports this local CA into an
+isolated temporary NSS store. Playwright keeps certificate validation enabled.
+Screenshots are saved under ignored `frontend/test-results/`. The test creates a
+one-day leaf certificate using the local CA in its temporary profile to serve
+localhost and IP-based foreign Origins on port 4443 inside the container. This
+fixture requires the ignored local CA private key; it never changes the frontend
+server certificate or host trust store. It also uses a sandboxed opaque-Origin frame.
+Browser testing is essential; a Node client supplying Origin cannot prove browser
+polling compatibility.
+
+Manual reproduction: open the trusted HTTPS shell; use browser developer tools to
+POST the pre-provisioned credentials to `/auth/login`, then GET `/auth/profile`.
+Observe the secure cookie in browser storage and its absence from `document.cookie`.
+Run the automated Socket.IO probe above; Network shows authenticated same-origin
+GETs with Cookie, Referer, same-origin/cors/empty Fetch Metadata and no Origin,
+followed by 200 responses. Polling POST supplies Origin; upgrade reaches WebSocket.
+Do not attempt a frontend header workaround.
+
+Stage 1 implementation is confined to foundations/tooling. Stage 2 remains unstarted.
+
+## Initial Stage 1 execution record (2026-11-10)
+
+Historical result before remediation: polling was blocked. The remediation below
+supersedes that connectivity verdict; the original evidence is retained.
+
+Verification used project `trivia-fe-stage1`, the root Compose file, this development
+overlay, and an outside-repository test override replacing the PostgreSQL data volume
+with tmpfs and removing database/backend host port publication. Existing persistent
+databases were not used. A random account was provisioned through the existing
+internal backend function; credentials remained in a private `/tmp` file.
+
+- Clean `npm ci` passed in the frontend image and named dependency volume.
+- `docker run --rm trivia-frontend-build:stage1 npm run check` passed strict
+  compilation, two Angular shell/router tests, three proxy regressions, ESLint,
+  Prettier, and the production build. The build was about 208 kB before compression.
+- Both `build` and `browser` Docker targets built successfully. Frontend, backend,
+  and PostgreSQL health checks passed.
+- Shutdown verification ended frontend, backend, and PostgreSQL with exit code 0.
+  Disposable verification containers/networks were removed; existing project services
+  and persistent databases were untouched.
+- Backend regressions ran in Docker with a separate disposable `trivia_test` database:
+  `node --import tsx --test tests/authentication.test.ts tests/sessions.test.ts tests/history.test.ts tests/lobby.test.ts tests/server.test.ts tests/lifecycle.test.ts`.
+  Result: **95 passed, zero failed/skipped**. This is not a rerun of the accepted 236-test baseline.
+- The real-browser command above passed the independent checks listed earlier,
+  but exited **1** for polling and upgrade. Redacted Chromium requests showed
+  `originPresent: false`, `refererPresent: true`, and `cookiePresent: true`.
+- An untrusted Docker peer supplying approved Origin and forged forwarded HTTPS
+  still received 403 from the backend. No backend security rules changed.
+- Unified Codebase Memory remains `Trivia`. New frontend source is eligible but
+  untracked/not yet represented in the current graph; source was inspected directly.
+  Dependencies, build/cache output, certificates/secrets, and screenshots are excluded.
+
+## Remediation verification
+
+Owner-approved orchestration is now root `compose.backend.yml` (standalone backend)
+and `compose.frontend.yml` (frontend overlay). The resolved backend-only and combined
+configurations were compared before/after renaming and were identical. No service,
+port, address, mount, dependency volume, or PostgreSQL infrastructure changed.
+Use explicit `-f` flags; neither filename is Compose's implicit default.
+
+Chromium confirms the distinction between browser context and identity:
+
+| Request                                           | Browser evidence                                                                      | Result    |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------- | --------- |
+| Authenticated same-origin polling GET             | Origin absent; site same-origin, mode cors, destination empty; Cookie/Referer present | 200       |
+| Authenticated polling POST                        | Approved Origin present                                                               | 200       |
+| Polling-to-WebSocket upgrade and direct WebSocket | Approved WebSocket Origin                                                             | Connected |
+| Anonymous polling / missing Referer               | Incomplete authentication or context                                                  | Rejected  |
+| Opaque sandbox Origin                             | Origin null; site cross-site                                                          | Rejected  |
+| Foreign localhost port                            | Disallowed Origin; site same-site                                                     | Rejected  |
+| Foreign IP Origin                                 | Disallowed Origin; site cross-site                                                    | Rejected  |
+
+The backend transport check runs before Socket.IO authentication. Its GET-only
+compatibility path additionally resolves the cookie session on every eligible GET.
+Referer alone, Fetch Metadata alone, or arbitrary forwarded headers grant nothing.
+A non-browser client can forge browser context, just as it can already send an
+allowlisted Origin, but still requires a valid session and an actual trusted HTTPS
+forwarding path. HTTP auth/History route policies and WebSocket Origin enforcement
+are unchanged.
+
+Docker verification includes clean frontend `npm ci`, strict compilation, two
+Angular shell/router tests, three proxy regressions, lint, formatting, build, and
+Chromium smoke. Backend full suite with disposable PostgreSQL: **262 passed,
+0 failed, 0 skipped**; changed backend files also passed typecheck, scoped ESLint,
+format verification and build. No persistent database was used. A separate real
+HTTPS two-player ten-question/ten-REVEAL-to-History smoke verifies the accepted
+backend path; it does not implement gameplay UI.
+
+Final frontend, backend and PostgreSQL health checks passed; all three containers
+shut down with exit code 0. Disposable containers/networks and smoke credentials
+were removed without modifying existing persistent volumes or unrelated services.
+
+Stage 1 acceptance is complete; Stage 2 has
+not begun. The original ten Moderate tooling advisories remain unchanged. The
+same-origin compatibility path intentionally fails closed for browsers/referrer
+policies omitting its required context; no fallback security bypass is provided.

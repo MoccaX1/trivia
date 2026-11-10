@@ -14,9 +14,11 @@ to update them.
 
 ## Structure & Boundaries
 
-The repository root owns Git, shared Docker orchestration and `docs/`.
-The backend application and its tooling live in `backend/`; `frontend/` is reserved
-for a standalone Angular application and is currently empty. Do not run Angular CLI
+The repository root owns Git, `compose.backend.yml` (standalone backend),
+`compose.frontend.yml` (frontend overlay), and `docs/`. Combine both files for
+frontend development; application Dockerfiles stay in their own directories.
+The backend application and its tooling live in `backend/`; `frontend/` contains
+the standalone Angular Stage 1 foundation. Do not run Angular CLI
 from `backend/`. `docs/api-contract.md` is authoritative for frontend integration.
 
 `backend/src/main.ts` wires startup, database availability, and shutdown;
@@ -32,7 +34,7 @@ Match state; PostgreSQL stores identity and completed History.
 Run all backend Node/npm/TypeScript commands inside Docker, with the application
 working directory `backend/` (images use `/app`). Do not depend on host Node or nvm.
 From the repository root, use the commands in `README.md`, for example:
-`docker compose --env-file backend/.env --profile tools run --build --rm tools npm run check`.
+`docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --build --rm tools npm run check`.
 Use strict TypeScript, ESM `.js` import specifiers, two-space indentation,
 single quotes, and Prettier. Run ESLint; preserve module import restrictions.
 Prefer descriptive camelCase functions and kebab-case filenames. Avoid custom DI,
@@ -50,7 +52,8 @@ clean shutdown. Report exact checks and limitations; do not claim unrun checks p
 ## Scope & Delivery
 
 The accepted backend supports authentication, ten-question gameplay, atomic
-completion persistence and participant-authorized History. Frontend is not initialized.
+completion persistence and participant-authorized History. Frontend has Stage 1
+foundations/tooling only; authentication, lobby, gameplay and History UI are not implemented.
 Do not implement deferred policies or add Redis, brokers, distributed
 ownership, or active-Match recovery without approval. Preserve unrelated user work.
 Keep `.env`, dependencies, builds, and caches out of Git; retain the lockfile.

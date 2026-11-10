@@ -2,13 +2,22 @@
 
 Single-process TypeScript backend in `backend/`: authenticated realtime gameplay
 through ten questions and ten reveals, live FINISHED, atomic PostgreSQL completion
-persistence, and participant-authorized HTTP History. `frontend/` is reserved for a
-future standalone Angular application; shared designs and the
+persistence, and participant-authorized HTTP History. `frontend/` contains the
+Stage 1 Angular foundation; shared designs and the
 [frontend API contract](docs/api-contract.md) remain in `docs/`.
 
 Run Compose from the repository root. Backend package scripts run inside Docker
 at `/app`, the image's backend application directory. Do not use host Node/npm/nvm
 or run Angular CLI from `backend/`.
+
+For Docker-first Angular tooling, local HTTPS certificates, browser smoke checks,
+and the narrowly authenticated same-origin polling policy, see the
+[frontend README](frontend/README.md). Authentication UI and gameplay are not implemented.
+
+Root orchestration uses `compose.backend.yml` for the standalone backend and
+`compose.frontend.yml` as its frontend development overlay. Combine them with
+`docker compose -f compose.backend.yml -f compose.frontend.yml`; application
+Dockerfiles remain in `backend/` and `frontend/`.
 
 ## Design authority
 
@@ -39,10 +48,10 @@ Compose does not load it automatically from `backend/`.
 
 ```sh
 cp backend/.env.example backend/.env
-docker compose --env-file backend/.env up --build --wait
+docker compose -f compose.backend.yml --env-file backend/.env up --build --wait
 curl --fail http://127.0.0.1:3000/health
-docker compose --env-file backend/.env ps
-docker compose --env-file backend/.env logs -f backend
+docker compose -f compose.backend.yml --env-file backend/.env ps
+docker compose -f compose.backend.yml --env-file backend/.env logs -f backend
 ```
 
 `GET /health` returns `200 {"status":"ok"}`. It reports process liveness, not
@@ -73,14 +82,14 @@ messages or stacks that could contain secrets.
 
 ```sh
 # Rebuild after source or dependency changes; no source bind mount is used.
-docker compose --env-file backend/.env up --build --wait
+docker compose -f compose.backend.yml --env-file backend/.env up --build --wait
 # Check the running environment using the development/tooling image.
-docker compose --env-file backend/.env --profile tools run --build --rm tools npm run check
-docker compose --env-file backend/.env --profile tools run --build --rm -e SMOKE_URL=http://backend:3000 tools npm run smoke
+docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --build --rm tools npm run check
+docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --build --rm -e SMOKE_URL=http://backend:3000 tools npm run smoke
 # Gracefully stop (retains containers and PostgreSQL data).
-docker compose --env-file backend/.env stop
+docker compose -f compose.backend.yml --env-file backend/.env stop
 # Remove containers/network, retaining the named database volume.
-docker compose --env-file backend/.env down
+docker compose -f compose.backend.yml --env-file backend/.env down
 ```
 
 The optional `tools` profile runs checks on demand; it is not another backend
@@ -96,8 +105,8 @@ The backend does not create schema at startup. Apply the versioned migration
 explicitly after PostgreSQL is healthy:
 
 ```sh
-docker compose --env-file backend/.env up -d --wait postgres
-docker compose --env-file backend/.env --profile tools run --build --rm tools npm run migrate
+docker compose -f compose.backend.yml --env-file backend/.env up -d --wait postgres
+docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --build --rm tools npm run migrate
 ```
 
 The tools image builds before applying migrations. Repeating the command is safe: applied SQL is tracked with a checksum;
@@ -107,12 +116,12 @@ No public registration or provisioning command is available.
 
 PostgreSQL integration tests require a separate database whose name ends in `_test`.
 For the default local Compose credentials, create one once with
-`docker compose --env-file backend/.env exec postgres createdb -U trivia trivia_test` (skip this step if it
+`docker compose -f compose.backend.yml --env-file backend/.env exec postgres createdb -U trivia trivia_test` (skip this step if it
 already exists). Set `TEST_DATABASE_URL` in your untracked `backend/.env` to a complete URL
 using host `postgres` and database `trivia_test`, then run:
 
 ```sh
-docker compose --env-file backend/.env --profile tools run --build --rm tools npm test
+docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --build --rm tools npm test
 ```
 
 The tests verify the database name before writing and clean up only their own
@@ -124,7 +133,7 @@ of committed files and command output.
 All package commands below are backend-local. From the repository root use:
 
 ```sh
-docker compose --env-file backend/.env --profile tools run --build --rm tools npm run typecheck
+docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --build --rm tools npm run typecheck
 ```
 
 Images copy `backend/` into `/app`, install clean dependencies and keep builds in
@@ -173,9 +182,9 @@ tools service. From the repository root, prepare a Docker tools image and isolat
 dependencies; the checkout's `backend/` is the package working directory:
 
 ```sh
-docker compose --env-file backend/.env --profile tools build tools
+docker compose -f compose.backend.yml --env-file backend/.env --profile tools build tools
 # Mount the whole checkout for Git and the root changelog, with isolated node_modules.
-docker compose --env-file backend/.env --profile tools run --rm \
+docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --rm \
   -v "$PWD:/workspace" -v /workspace/backend/node_modules -w /workspace/backend \
   tools sh -c 'npm ci && npm run release:dry-run'
 ```
@@ -223,7 +232,8 @@ backend/tests/*.test.ts             Deterministic domain/runtime and infrastruct
 backend/scripts/smoke.mjs           Smoke check for a running environment
 docs/                       Preserved architectural and engineering designs
 backend/Dockerfile          Development, build, and minimal runtime stages
-docker-compose.yml          Backend, PostgreSQL, optional tooling profile
+compose.backend.yml         Backend, PostgreSQL, optional tooling profile
+compose.frontend.yml        Frontend HTTPS development overlay
 ```
 
 Keep application and domain code independent of transport and database libraries;
@@ -263,9 +273,13 @@ Configure `AUTH_COOKIE_MODE`, `AUTH_PUBLIC_ORIGIN`, and comma-separated exact
 `AUTH_ORIGINS`. Secure mode requires HTTPS and permits only schemeful same-site
 origins (private public-suffix boundaries included). It uses
 `__Host-trivia_session; Path=/; HttpOnly; Secure; SameSite=Lax`, without Domain.
-Credentialed CORS and preflight support configured origins; missing/null or other
-origins are rejected. The same Origin rule protects polling and WebSocket handshakes.
-Only safe read-only `GET /auth/profile` permits missing Origin without Referer; a present Origin must be allowed, and null/disallowed origins reject. Session authentication and no-store remain mandatory, with no idle refresh. Login/logout and every Socket.IO handshake still require Origin. No frontend domain/port or deployment topology is assumed. HTTPS terminated at a
+Credentialed CORS and preflight support configured origins. Every present Origin
+must be allowlisted; null/disallowed values reject. Safe read-only profile/History
+GETs permit absent Origin without Referer, with session/no-store/non-refresh rules
+unchanged. Login/logout, polling POST, and WebSocket require Origin. Only polling
+GET has the narrowly session-authenticated trusted-HTTPS/Fetch Metadata exception
+defined in [API §4](docs/api-contract.md#4-socketio-connection-and-subscriptions).
+The frontend development overlay selects its local Origin explicitly. HTTPS terminated at a
 proxy requires `AUTH_TRUST_PROXY` with only its explicit IP/CIDR addresses; forwarded
 IP/TLS headers from other peers are ignored. Forwarded TLS must be exactly `https`.
 

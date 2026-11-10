@@ -1,0 +1,50 @@
+{
+  "name": "trivia-frontend",
+  "version": "0.0.0",
+  "scripts": {
+    "ng": "ng",
+    "start": "node scripts/dev-server.mjs",
+    "start:demo": "npm start -- --live-reload=false --hmr=false",
+    "typecheck": "ngc --noEmit -p tsconfig.app.json",
+    "test": "ng test --watch=false && node --test tests/*.test.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "build": "ng build",
+    "check": "npm run typecheck && npm test && npm run lint && npm run format:check && npm run build",
+    "smoke:browser": "node scripts/browser-smoke.mjs"
+  },
+  "private": true,
+  "packageManager": "npm@11.20.0",
+  "dependencies": {
+    "@angular/common": "22.2.5",
+    "@angular/compiler": "22.2.5",
+    "@angular/core": "22.2.5",
+    "@angular/forms": "22.2.5",
+    "@angular/platform-browser": "22.2.5",
+    "@angular/router": "22.2.5",
+    "rxjs": "7.8.2",
+    "tslib": "2.9.1"
+  },
+  "devDependencies": {
+    "@angular/build": "22.2.6",
+    "@angular/cli": "22.2.6",
+    "@angular/compiler-cli": "22.2.5",
+    "jsdom": "31.0.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0",
+    "eslint": "10.14.0",
+    "@eslint/js": "10.0.1",
+    "angular-eslint": "22.6.0",
+    "typescript-eslint": "8.72.2",
+    "@playwright/test": "1.65.0",
+    "socket.io-client": "4.8.4",
+    "http-proxy": "1.18.1"
+  },
+  "engines": {
+    "node": "26.13.0",
+    "npm": "11.20.0"
+  },
+  "type": "module"
+}

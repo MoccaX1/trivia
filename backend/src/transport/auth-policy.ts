@@ -106,6 +106,10 @@ export function sessionCookie(policy: AuthPolicy, token: string): string {
 export function secureRequest(policy: AuthPolicy, request: IncomingMessage): boolean {
   if (policy.local) return loopback(request.socket.remoteAddress ?? '');
   if ('encrypted' in request.socket && request.socket.encrypted) return true;
+  return trustedHttpsProxy(policy, request);
+}
+
+function trustedHttpsProxy(policy: AuthPolicy, request: IncomingMessage): boolean {
   const address = (request.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
   const trusted = new BlockList();
   for (const entry of policy.trustProxy || []) {
@@ -119,4 +123,39 @@ export function secureRequest(policy: AuthPolicy, request: IncomingMessage): boo
     trusted.check(address, isIP(address) === 6 ? 'ipv6' : 'ipv4') &&
     request.headers['x-forwarded-proto'] === 'https'
   );
+}
+
+/** Origin-less browser polling is contextual authorization, never authentication. */
+export function allowedSocketRequest(policy: AuthPolicy, request: IncomingMessage): boolean {
+  if (!secureRequest(policy, request)) return false;
+  if (request.headers.origin !== undefined) return allowedOrigin(policy, request.headers.origin);
+  if (
+    policy.local ||
+    !trustedHttpsProxy(policy, request) ||
+    request.method !== 'GET' ||
+    request.headers.upgrade !== undefined ||
+    request.headers['sec-fetch-site'] !== 'same-origin' ||
+    request.headers['sec-fetch-mode'] !== 'cors' ||
+    request.headers['sec-fetch-dest'] !== 'empty' ||
+    !allowedOrigin(policy, policy.publicOrigin)
+  )
+    return false;
+  try {
+    const target = new URL(request.url ?? '', policy.publicOrigin);
+    const publicUrl = new URL(policy.publicOrigin);
+    const referer = new URL(request.headers.referer ?? '');
+    return (
+      target.pathname === '/socket.io/' &&
+      target.searchParams.getAll('EIO').length === 1 &&
+      target.searchParams.get('EIO') === '4' &&
+      target.searchParams.getAll('transport').length === 1 &&
+      target.searchParams.get('transport') === 'polling' &&
+      request.headers.host === publicUrl.host &&
+      referer.origin === policy.publicOrigin &&
+      !referer.username &&
+      !referer.password
+    );
+  } catch {
+    return false;
+  }
 }
