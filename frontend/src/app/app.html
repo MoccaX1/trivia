@@ -8,6 +8,11 @@
     <span class="edition">A little friendly competition.</span>
   </header>
   <main id="main-content" tabindex="-1">
+    @if (
+      session.state().status === 'checking' && !session.pending() && router.currentNavigation()
+    ) {
+      <p role="status">Checking your session…</p>
+    }
     <router-outlet />
   </main>
   <footer class="footer">Room for curiosity. Ready for what comes next.</footer>

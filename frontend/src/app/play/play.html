@@ -1,0 +1,25 @@
+<section aria-labelledby="play-title">
+  @if (session.player(); as player) {
+    <p class="eyebrow">Your session is active</p>
+    <h1 id="play-title">Welcome, {{ player.displayName }}.</h1>
+    <p class="description">A space for good questions and a little friendly competition.</p>
+    <p class="next">Match features arrive in Stage 3.</p>
+    @if (session.logoutUnconfirmed()) {
+      <p class="feedback" role="alert">
+        Your session is still active. The previous sign-out was not confirmed. You can try again.
+      </p>
+    }
+    <button
+      type="button"
+      (click)="session.logout()"
+      [disabled]="!!session.pending() || session.retryBlocked()"
+    >
+      Sign out
+    </button>
+  } @else {
+    <h1 id="play-title">One moment</h1>
+    <p role="status">
+      {{ session.pending() === 'logout' ? 'Signing out…' : 'Checking your session…' }}
+    </p>
+  }
+</section>

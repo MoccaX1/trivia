@@ -1,9 +1,59 @@
-# Trivia frontend — Stage 1
+# Trivia frontend — Stage 2
 
-Angular 22 foundation only: a routed shell, light-theme SCSS tokens, Docker tooling,
-and local HTTPS integration. No authentication UI/state, lobby, gameplay, or History
-screens exist. Follow [design guidelines](../docs/frontend-design-guidelines.md)
+Angular 22 SPA with login, server-session verification, protected `/play`, and
+logout, using the accepted Stage 1 Docker/HTTPS foundation. Match entry, lobby,
+gameplay, and History screens are not implemented. Follow [design guidelines](../docs/frontend-design-guidelines.md)
 and the [API contract](../docs/api-contract.md).
+
+## Authentication and protected navigation
+
+Open `https://localhost:4200/` with the local CA trusted. A pre-provisioned account
+is required; there is no registration or password-recovery UI. Enter credentials
+exactly as provisioned. Username case is preserved in the request and canonicalized
+only by the backend; neither field is trimmed. Credentials live only in the form's
+memory for its lifetime; the form clears on successful login. No tokens or
+credentials are placed in browser storage or URLs.
+
+- Entry to `/`, `/login`, or `/play` shares one initial `GET /auth/profile` check.
+  A 200 restores the public Player profile; `401 UNAUTHENTICATED` means anonymous.
+  Network/timeout, 403, 500, and 503 verification failures hide private content and
+  show explicit recovery instead of assuming expiry or entering a redirect loop.
+- `/login` uses Signal Forms with accessible labels, backend-compatible input bounds,
+  and inline validation/authentication errors. Deliberate submission sends exactly
+  `{ username, password }` to `POST /auth/login`; duplicates are blocked while pending.
+  A rejected form retains the inputs. There are no automatic login retries.
+- `/play` requires a verified authenticated state and shows only the Player's display
+  name, active-session message, sign-out control, and a noninteractive Stage 3 note.
+  Authenticated `/login` visits redirect here. All implemented protected destinations
+  currently resolve to `/play`; arbitrary `returnTo` URLs are never followed.
+  Unknown/future feature paths show a not-found page, not feature placeholders.
+- Sign out sends JSON `{}` to `POST /auth/logout`. A 204 clears the local viewer and
+  returns to Login. A `401 UNAUTHENTICATED` shows an already-ended session, without
+  claiming a successful revocation. Other failures/timeouts hide the previous profile
+  and explicitly say sign-out was not confirmed. The user can check the session or
+  retry sign-out; neither mutation is automatically resent. If revalidation succeeds,
+  `/play` states that the session is still active.
+- Relative Angular HttpClient requests use `withCredentials: true` and a 10-second
+  request timeout. Cookies remain browser-managed, HttpOnly, Secure, and SameSite=Lax.
+  No cookie parsing, token persistence, identity headers, or Origin rewriting exists.
+  Backend guards remain the security authority; Angular guards only aid navigation.
+- The single `Session` service exposes readonly signals for checking/authenticated/
+  anonymous/unavailable state and operation feedback. Each request captures an epoch;
+  obsolete results cannot replace the current viewer or clear a newer session.
+  Profile checks coalesce, and mutations are not dispatched twice while unresolved.
+  Future protected readers must capture `generation` before their request and pass it
+  to `unauthenticated(generation)` only for authoritative `401 UNAUTHENTICATED`.
+  Currently the only viewer-owned private data is the in-memory profile.
+- 400/413/415 show input feedback; invalid credentials, forbidden connection, rate
+  limits, server failures, and network failures have distinct safe copy. Retry-After
+  blocks retries until its deadline; no keep-alive, recurring profile polling, or
+  session-refresh mechanism is added. Session changes in another tab are discovered
+  on the next supported authenticated request/reload, not instantaneously synchronized.
+
+The light-theme tokens remain provisional. Login and `/play` use opaque surfaces,
+scoped SCSS, semantic native controls, visible keyboard focus, live error/status
+regions, responsive reflow, and reduced-motion support. Internal route changes move
+focus to the main landmark; initial load retains normal document tab order.
 
 ## Versions and checks
 
@@ -102,9 +152,10 @@ dc logs frontend backend
 dc stop
 ```
 
-`typecheck` uses Angular compiler strict/template checks. `test` runs two shell/router
-foundation tests with CLI-default Vitest and three Node proxy-boundary regressions;
-it does not establish future feature correctness. Build also compiles strict templates.
+`typecheck` uses Angular compiler strict/template checks. `test` runs 36 focused
+Angular tests (22 session/HTTP/concurrency, 8 routing/shell, 6 Login form) with
+CLI-default Vitest, plus three Node proxy-boundary regressions. It does not establish
+future feature correctness. Build also compiles strict templates.
 ESLint covers TypeScript, Angular HTML accessibility, and tooling JavaScript.
 Prettier checks source/configuration/docs. Install audit currently reports ten Moderate
 ESLint/minimatch tooling findings, no High/Critical; no forced downgrade/override was
@@ -131,7 +182,7 @@ created. Wire headers are captured using CDP and logged with cookie values redac
 Use a controlled pre-provisioned disposable account and an outside-repository JSON
 file containing exactly username/password. Do not embed credentials in source or
 committed configuration. Provisioning remains internal; the root README describes
-migration and identity prerequisites. The test is not a Login UI or provisioning API.
+migration and identity prerequisites. This probe exercises transport directly, independently of the Login UI; provisioning stays internal.
 
 ```sh
 docker build --target browser -t trivia-frontend-browser frontend
@@ -147,6 +198,16 @@ docker run --rm --network "container:$(dc ps -q frontend)" \
 
 The browser target uses Node 26 and Chromium; it imports this local CA into an
 isolated temporary NSS store. Playwright keeps certificate validation enabled.
+Run the separate Stage 2 UI smoke with the same Docker mounts/network/environment,
+adding `sh scripts/browser-smoke.sh scripts/auth-browser-smoke.mjs` after the image
+name. It uses the actual Login and Sign out controls, checks reload/redirects and
+server revocation, and uses browser request interception to simulate failed/ambiguous
+logout, unavailable profile, network loss, and forbidden connection responses.
+It also verifies pending/duplicate protection, keyboard/focus, mobile touch,
+320-pixel reflow with 200% root text, and reduced motion. Request/cookie values are
+never logged. Tests require exclusive use of this disposable account and remove no
+accounts automatically; the fixture owner must revoke sessions/remove it afterward.
+
 Screenshots are saved under ignored `frontend/test-results/`. The test creates a
 one-day leaf certificate using the local CA in its temporary profile to serve
 localhost and IP-based foreign Origins on port 4443 inside the container. This
@@ -237,7 +298,39 @@ Final frontend, backend and PostgreSQL health checks passed; all three container
 shut down with exit code 0. Disposable containers/networks and smoke credentials
 were removed without modifying existing persistent volumes or unrelated services.
 
-Stage 1 acceptance is complete; Stage 2 has
-not begun. The original ten Moderate tooling advisories remain unchanged. The
+Stage 1 acceptance was complete before Stage 2. The original ten Moderate tooling advisories remain unchanged. The
 same-origin compatibility path intentionally fails closed for browsers/referrer
 policies omitting its required context; no fallback security bypass is provided.
+
+## Stage 2 verification
+
+Executed in Docker with Node 26.13.0/npm 11.20.0, using both root Compose files:
+
+- Clean `npm ci` passed. `npm run check` passed strict/template compilation,
+  **36 Angular tests and 3 proxy tests, zero failures/skips**, ESLint, Prettier,
+  and production build (about 327 kB raw / 87 kB estimated transfer).
+- `scripts/auth-browser-smoke.mjs` passed in real Chromium with trusted local TLS:
+  anonymous entry; usable form and exact credentials; pending/duplicate prevention;
+  invalid credentials; Secure/HttpOnly cookie; restored profile on reload; protected
+  and Login redirects; real logout and rejection of the revoked cookie; truthful
+  failed/unknown logout and explicit recovery; simulated network/503/403 failures.
+- `scripts/browser-smoke.mjs` passed authenticated polling GET/POST, polling-to-WebSocket
+  upgrade, direct WebSocket, logout disconnect, and anonymous/null/disallowed same-site/
+  cross-site Origin rejection. No Match commands or subscriptions were created.
+- Focus/tab order, keyboard submission, touch activation, 320/375/768-pixel layouts,
+  200% text at 320 pixels, and reduced motion were checked in Chromium; desktop/mobile
+  screenshots were inspected. Semantic accessibility snapshots were checked. A human
+  screen-reader speech review remains outstanding; no full WCAG compliance is claimed.
+- The initially running backend image predated the accepted History integration;
+  it was rebuilt from unchanged accepted source. Its existing development database
+  contained migration 001 only. Verification therefore used a separate temporary
+  database with existing migrations 001–003, without migrating the original database.
+  Focused backend `authentication.test.ts`, `sessions.test.ts`, and
+  `socket-origin.test.ts` regressions passed **49 / 49, zero skipped**. No full backend
+  suite rerun is claimed. Backend/proxy/Compose source and security policy are unchanged.
+
+Before broader integrated demo work, the development database owner must apply the
+already accepted migrations using the existing root README workflow. Stage 2 has not
+silently changed that database's schema. Disposable test accounts/database/credential
+files are removed after verification, and the original runtime database connection
+is restored. No Match, lobby, gameplay, or History UI has been added.

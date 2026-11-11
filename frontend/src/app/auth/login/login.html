@@ -1,0 +1,94 @@
+<section class="entry" aria-labelledby="login-title">
+  <div class="introduction">
+    <p class="eyebrow">A little curiosity goes a long way.</p>
+    <h1 id="login-title">Good questions.<br />Better together.</h1>
+    <p class="description">Welcome to Trivia. Sign in and make yourself at home.</p>
+  </div>
+  <div class="sign-in">
+    @let state = session.state();
+    @if (state.status === 'anonymous' || session.pending() === 'login') {
+      <h2>Sign in</h2>
+      <p class="hint" id="account-help">
+        Use your pre-provisioned account. Need access? Ask the demo organizer.
+      </p>
+      <form
+        (submit)="signIn($event)"
+        novalidate
+        aria-describedby="account-help"
+        [attr.aria-busy]="session.pending() === 'login'"
+      >
+        <div class="field">
+          <label for="username">Username</label>
+          <input
+            id="username"
+            type="text"
+            autocomplete="username"
+            autocapitalize="none"
+            spellcheck="false"
+            [formField]="fields.username"
+            aria-describedby="username-error"
+            [attr.aria-invalid]="fields.username().touched() && fields.username().invalid()"
+          />
+          <div id="username-error" class="field-error" role="alert">
+            @if (fields.username().touched()) {
+              @for (error of fields.username().errors(); track error.kind) {
+                <span>{{ error.message }}</span>
+              }
+            }
+          </div>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            [formField]="fields.password"
+            aria-describedby="password-error"
+            [attr.aria-invalid]="fields.password().touched() && fields.password().invalid()"
+          />
+          <div id="password-error" class="field-error" role="alert">
+            @if (fields.password().touched()) {
+              @for (error of fields.password().errors(); track error.kind) {
+                <span>{{ error.message }}</span>
+              }
+            }
+          </div>
+        </div>
+        <p class="feedback" role="alert">{{ session.issue()?.message }}</p>
+        <button type="submit" [disabled]="!!session.pending() || session.retryBlocked()">
+          {{ session.pending() === 'login' ? 'Signing in…' : 'Sign in' }}
+        </button>
+        <p class="pending" role="status">
+          {{ session.pending() === 'login' ? 'Checking your credentials…' : '' }}
+        </p>
+      </form>
+    } @else if (state.status === 'unavailable') {
+      <h2>Let’s check your session</h2>
+      <p class="feedback" role="alert">{{ state.issue.message }}</p>
+      <p class="hint">
+        Your session may still be active. Private information stays hidden until we can verify it.
+      </p>
+      <div class="recovery">
+        <button type="button" (click)="session.check()" [disabled]="session.retryBlocked()">
+          Check session again
+        </button>
+        @if (session.logoutUnconfirmed()) {
+          <button
+            class="secondary"
+            type="button"
+            (click)="session.logout()"
+            [disabled]="session.retryBlocked()"
+          >
+            Retry sign out
+          </button>
+        }
+      </div>
+    } @else {
+      <h2>One moment</h2>
+      <p role="status">
+        {{ session.pending() === 'logout' ? 'Signing out…' : 'Checking your session…' }}
+      </p>
+    }
+  </div>
+</section>

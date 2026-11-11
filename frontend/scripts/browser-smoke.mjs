@@ -80,7 +80,7 @@ const foreign = createServer(
 try {
   await page.goto(origin);
   await page.getByRole('heading', { level: 1 }).waitFor();
-  assert.equal(await page.title(), 'Trivia — Frontend foundation');
+  assert.equal(await page.title(), 'Sign in — Trivia');
   await page.keyboard.press('Tab');
   assert.equal(await page.locator(':focus').textContent(), 'Skip to content');
   await page.keyboard.press('Enter');
@@ -100,7 +100,10 @@ try {
   );
   await page.goto(origin + '/foundation-route-probe');
   await page.getByRole('heading', { level: 1 }).waitFor();
-  assert.equal(new URL(page.url()).pathname, '/');
+  assert.equal(new URL(page.url()).pathname, '/foundation-route-probe');
+  assert.equal(await page.locator('h1').textContent(), 'Page not found');
+  await page.goto(origin + '/login');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
 
   const request = (path, init) =>
     page.evaluate(

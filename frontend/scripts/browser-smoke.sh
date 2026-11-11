@@ -14,4 +14,4 @@ openssl x509 -req -in "$HOME/foreign.csr" -CA .certs/ca.pem -CAkey .certs/ca-key
   -set_serial 7341 -out "$HOME/foreign.pem" -days 1 -sha256 -extfile "$HOME/foreign.ext" 2>/dev/null
 export SMOKE_FOREIGN_KEY="$HOME/foreign-key.pem"
 export SMOKE_FOREIGN_CERT="$HOME/foreign.pem"
-exec node scripts/browser-smoke.mjs
+exec node "${1:-scripts/browser-smoke.mjs}"
