@@ -152,8 +152,8 @@ dc logs frontend backend
 dc stop
 ```
 
-`typecheck` uses Angular compiler strict/template checks. `test` runs 36 focused
-Angular tests (22 session/HTTP/concurrency, 8 routing/shell, 6 Login form) with
+`typecheck` uses Angular compiler strict/template checks. `test` runs 44 focused
+Angular tests (22 session/HTTP/concurrency, 8 routing/shell, 14 Login form) with
 CLI-default Vitest, plus three Node proxy-boundary regressions. It does not establish
 future feature correctness. Build also compiles strict templates.
 ESLint covers TypeScript, Angular HTML accessibility, and tooling JavaScript.
@@ -203,6 +203,12 @@ adding `sh scripts/browser-smoke.sh scripts/auth-browser-smoke.mjs` after the im
 name. It uses the actual Login and Sign out controls, checks reload/redirects and
 server revocation, and uses browser request interception to simulate failed/ambiguous
 logout, unavailable profile, network loss, and forbidden connection responses.
+It also compares button geometry across idle, submitting, rejection, repeated attempts,
+required validation, and correction at desktop/mobile widths and 200% text. Layout-only
+responses are intercepted; the authentication lifecycle still uses the real API.
+The form derives loading from Signal Forms `submitting()` and retains session-level
+pending/retry protection. One polite feedback region below the button and modest
+field-message space keep ordinary transitions stable; long messages expand naturally.
 It also verifies pending/duplicate protection, keyboard/focus, mobile touch,
 320-pixel reflow with 200% root text, and reduced motion. Request/cookie values are
 never logged. Tests require exclusive use of this disposable account and remove no
@@ -302,7 +308,7 @@ Stage 1 acceptance was complete before Stage 2. The original ten Moderate toolin
 same-origin compatibility path intentionally fails closed for browsers/referrer
 policies omitting its required context; no fallback security bypass is provided.
 
-## Stage 2 verification
+## Stage 2 verification (initial implementation)
 
 Executed in Docker with Node 26.13.0/npm 11.20.0, using both root Compose files:
 

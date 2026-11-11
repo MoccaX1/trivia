@@ -1,4 +1,4 @@
-import { Component, effect, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { form, FormField, readonly, required, submit, validate } from '@angular/forms/signals';
 import { Router } from '@angular/router';
 import { Session } from '../session.js';
@@ -22,16 +22,36 @@ export class Login {
         ? {
             kind: 'format',
             message:
-              'Use 1–128 letters, numbers, underscores, dots or hyphens. Spaces are not allowed.',
+              text.length > 128
+                ? 'Use at most 128 characters.'
+                : 'Use A–Z, a–z, 0–9, _ . -; no spaces.',
           }
         : undefined;
     });
     required(path.password, { message: 'Enter your password.' });
     validate(path.password, ({ value }) =>
       new TextEncoder().encode(value()).length > 1024
-        ? { kind: 'format', message: 'The password must be at most 1024 UTF-8 bytes.' }
+        ? { kind: 'format', message: 'Use at most 1024 UTF-8 bytes.' }
         : undefined,
     );
+  });
+
+  protected readonly isSigningIn = computed(() => this.fields().submitting());
+  protected readonly submitDisabled = computed(
+    () => this.isSigningIn() || !!this.session.pending() || this.session.retryBlocked(),
+  );
+  protected readonly usernameError = computed(() => {
+    const field = this.fields.username();
+    return field.touched() ? field.errors()[0]?.message : undefined;
+  });
+  protected readonly passwordError = computed(() => {
+    const field = this.fields.password();
+    return field.touched() ? field.errors()[0]?.message : undefined;
+  });
+  protected readonly feedback = computed(() => {
+    if (this.isSigningIn()) return 'Checking your credentials…';
+    if (this.usernameError() || this.passwordError()) return 'Check the highlighted fields.';
+    return this.session.issue()?.message;
   });
 
   constructor() {
@@ -47,7 +67,7 @@ export class Login {
 
   protected signIn(event: Event): void {
     event.preventDefault();
-    if (this.session.pending() || this.session.retryBlocked()) return;
+    if (this.submitDisabled()) return;
     void submit(this.fields, async () => {
       await this.session.login(this.credentials());
     });

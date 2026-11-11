@@ -31,6 +31,7 @@ h1 {
   margin: 0;
 }
 .sign-in {
+  container-type: inline-size;
   width: 100%;
   max-width: 26rem;
   padding: var(--space-6);
@@ -51,6 +52,7 @@ h2 {
 }
 form {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
 }
 .field {
@@ -75,30 +77,31 @@ input {
 input[aria-invalid='true'] {
   border-color: var(--color-error);
 }
+// Reserve ordinary validation/status lines without clipping longer messages.
+.field-feedback {
+  min-block-size: 1lh;
+  font-size: var(--text-small);
+}
+.field-error,
+.feedback-error {
+  color: var(--color-error);
+}
 .field-error {
-  display: grid;
-  color: var(--color-error);
-  font-size: var(--text-small);
-}
-.field-error:empty {
-  display: none;
-}
-.feedback {
-  color: var(--color-error);
-  font-size: var(--text-small);
   margin: 0;
   overflow-wrap: anywhere;
 }
-.feedback:empty,
-.pending:empty {
-  display: none;
-}
-.pending {
-  margin: 0;
-  color: var(--color-text-secondary);
+.feedback {
+  min-block-size: 2lh;
   font-size: var(--text-small);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.feedback p {
+  margin: 0;
 }
 button {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
   min-height: 2.75rem;
   padding: var(--space-3) var(--space-4);
   font: inherit;
@@ -142,6 +145,13 @@ button:disabled {
     gap: var(--space-6);
   }
   .sign-in {
-    padding: var(--space-5);
+    padding: min(var(--space-5), 6vw);
+  }
+}
+
+// Enlarged text can wrap the pending label; reserve two lines only when needed.
+@container (inline-size < 14em) {
+  button[type='submit'] {
+    min-block-size: calc(2lh + 2 * var(--space-3) + 2px);
   }
 }

@@ -11,12 +11,7 @@
       <p class="hint" id="account-help">
         Use your pre-provisioned account. Need access? Ask the demo organizer.
       </p>
-      <form
-        (submit)="signIn($event)"
-        novalidate
-        aria-describedby="account-help"
-        [attr.aria-busy]="session.pending() === 'login'"
-      >
+      <form (submit)="signIn($event)" novalidate aria-describedby="account-help">
         <div class="field">
           <label for="username">Username</label>
           <input
@@ -26,14 +21,12 @@
             autocapitalize="none"
             spellcheck="false"
             [formField]="fields.username"
-            aria-describedby="username-error"
-            [attr.aria-invalid]="fields.username().touched() && fields.username().invalid()"
+            [attr.aria-describedby]="usernameError() ? 'username-error' : null"
+            [attr.aria-invalid]="!!usernameError()"
           />
-          <div id="username-error" class="field-error" role="alert">
-            @if (fields.username().touched()) {
-              @for (error of fields.username().errors(); track error.kind) {
-                <span>{{ error.message }}</span>
-              }
+          <div class="field-feedback">
+            @if (usernameError(); as message) {
+              <p id="username-error" class="field-error">{{ message }}</p>
             }
           </div>
         </div>
@@ -44,24 +37,23 @@
             type="password"
             autocomplete="current-password"
             [formField]="fields.password"
-            aria-describedby="password-error"
-            [attr.aria-invalid]="fields.password().touched() && fields.password().invalid()"
+            [attr.aria-describedby]="passwordError() ? 'password-error' : null"
+            [attr.aria-invalid]="!!passwordError()"
           />
-          <div id="password-error" class="field-error" role="alert">
-            @if (fields.password().touched()) {
-              @for (error of fields.password().errors(); track error.kind) {
-                <span>{{ error.message }}</span>
-              }
+          <div class="field-feedback">
+            @if (passwordError(); as message) {
+              <p id="password-error" class="field-error">{{ message }}</p>
             }
           </div>
         </div>
-        <p class="feedback" role="alert">{{ session.issue()?.message }}</p>
-        <button type="submit" [disabled]="!!session.pending() || session.retryBlocked()">
-          {{ session.pending() === 'login' ? 'Signing in…' : 'Sign in' }}
+        <button type="submit" [disabled]="submitDisabled()" [attr.aria-busy]="isSigningIn()">
+          {{ isSigningIn() ? 'Signing in…' : 'Sign in' }}
         </button>
-        <p class="pending" role="status">
-          {{ session.pending() === 'login' ? 'Checking your credentials…' : '' }}
-        </p>
+        <div class="feedback" role="status" aria-atomic="true">
+          @if (feedback(); as message) {
+            <p [class.feedback-error]="!isSigningIn()">{{ message }}</p>
+          }
+        </div>
       </form>
     } @else if (state.status === 'unavailable') {
       <h2>Let’s check your session</h2>

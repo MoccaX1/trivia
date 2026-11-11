@@ -42,7 +42,121 @@ async function assertReflow(width, height, scale = '100%') {
     `Reflow at ${width}px / ${scale}`,
   );
 }
+// Compare document geometry across transitions, independent of viewport scrolling.
+// These layout-only responses are controlled; the lifecycle below uses the real API.
+async function verifyLoginLayout(width) {
+  const layoutContext = await browser.newContext({ viewport: { width, height: 900 } });
+  try {
+    const target = await layoutContext.newPage();
+    await target.goto(origin + '/login');
+    const button = target.locator('button[type=submit]');
+    await expect(button).toBeVisible();
+    await target.getByLabel('Username', { exact: true }).fill('layout_probe');
+    await target.getByLabel('Password', { exact: true }).fill('not-a-real-account');
+    const geometry = () =>
+      button.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x + window.scrollX,
+          y: rect.y + window.scrollY,
+          width: rect.width,
+          height: rect.height,
+        };
+      });
+    const initial = await geometry();
+    const positions = { idle: initial };
+    const record = async (state) => {
+      const position = await geometry();
+      for (const key of ['x', 'y', 'width', 'height']) {
+        assert.ok(
+          Math.abs(position[key] - initial[key]) <= 1,
+          `${width}px ${state}: button ${key} moved`,
+        );
+      }
+      positions[state] = position;
+      await target.screenshot({
+        path: `test-results/login-stable-${width}-${state}.png`,
+        fullPage: true,
+      });
+    };
+    await record('idle');
+    let release;
+    await target.route('**/auth/login', async (route) => {
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+      await route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: '{"code":"INVALID_CREDENTIALS"}',
+      });
+    });
+    for (const attempt of [1, 2]) {
+      await button.click();
+      await expect(button).toHaveText('Signing in…');
+      await expect(button).toBeDisabled();
+      await record(`pending-${attempt}`);
+      release();
+      await expect(target.locator('form .feedback')).toContainText('incorrect');
+      await record(`error-${attempt}`);
+    }
+    // Ordinary field messages also fit the reserved line without moving the button.
+    await target.getByLabel('Username', { exact: true }).fill('');
+    await target.getByLabel('Password', { exact: true }).fill('');
+    await button.click();
+    await expect(target.locator('#username-error')).toContainText('Enter your username');
+    await record('required');
+    await target.getByLabel('Username', { exact: true }).fill('layout_probe');
+    await target.getByLabel('Password', { exact: true }).fill('not-a-real-account');
+    await record('corrected');
+    // Text enlargement must reflow; unusually long errors are allowed to grow.
+    await target.setViewportSize({ width: 320, height: 740 });
+    await target.evaluate(() => {
+      document.documentElement.style.fontSize = '200%';
+    });
+    assert.equal(
+      await target.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      true,
+    );
+    assert.equal(
+      await target
+        .locator('.feedback')
+        .evaluate((element) => element.scrollHeight <= element.clientHeight),
+      true,
+    );
+    await target.screenshot({
+      path: `test-results/login-stable-${width}-text-200.png`,
+      fullPage: true,
+    });
+    const zoomedInitial = await geometry();
+    await button.click();
+    await expect(button).toHaveText('Signing in…');
+    const zoomedPending = await geometry();
+    release();
+    await expect(target.locator('form .feedback')).toContainText('incorrect');
+    const zoomedError = await geometry();
+    for (const position of [zoomedPending, zoomedError]) {
+      for (const key of ['x', 'y', 'width', 'height']) {
+        assert.ok(
+          Math.abs(position[key] - zoomedInitial[key]) <= 1,
+          `200% text: button ${key} moved`,
+        );
+      }
+    }
+    assert.equal(
+      await target.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      true,
+    );
+    console.log(`Login geometry ${width}px:`, JSON.stringify(positions));
+  } finally {
+    await layoutContext.close();
+  }
+}
+
 try {
+  await mkdir('test-results', { recursive: true });
+  await verifyLoginLayout(1280);
+  await verifyLoginLayout(375);
   await page.goto(origin);
   await expect(page).toHaveURL(/\/login/);
   await expect(signIn).toBeVisible();
