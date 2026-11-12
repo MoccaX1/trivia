@@ -1,20 +1,20 @@
-# Trivia frontend — Stage 2
+# Trivia frontend — Stage 2.5
 
-Angular 22 SPA with login, server-session verification, protected `/play`, and
-logout, using the accepted Stage 1 Docker/HTTPS foundation. Match entry, lobby,
+Angular 22 SPA with self-registration, login, server-session verification, protected
+`/play`, and logout, using the accepted Stage 1 Docker/HTTPS foundation. Match entry, lobby,
 gameplay, and History screens are not implemented. Follow [design guidelines](../docs/frontend-design-guidelines.md)
 and the [API contract](../docs/api-contract.md).
 
 ## Authentication and protected navigation
 
-Open `https://localhost:4200/` with the local CA trusted. A pre-provisioned account
-is required; there is no registration or password-recovery UI. Enter credentials
-exactly as provisioned. Username case is preserved in the request and canonicalized
+Open `https://localhost:4200/` with the local CA trusted. Choose **Create an account**
+or visit `/register`; existing pre-provisioned accounts still work. Password recovery
+is not implemented. Enter credentials exactly as created. Username case is preserved in the request and canonicalized
 only by the backend; neither field is trimmed. Credentials live only in the form's
 memory for its lifetime; the form clears on successful login. No tokens or
 credentials are placed in browser storage or URLs.
 
-- Entry to `/`, `/login`, or `/play` shares one initial `GET /auth/profile` check.
+- Entry to `/`, `/login`, `/register`, or `/play` shares one initial `GET /auth/profile` check.
   A 200 restores the public Player profile; `401 UNAUTHENTICATED` means anonymous.
   Network/timeout, 403, 500, and 503 verification failures hide private content and
   show explicit recovery instead of assuming expiry or entering a redirect loop.
@@ -54,6 +54,68 @@ The light-theme tokens remain provisional. Login and `/play` use opaque surfaces
 scoped SCSS, semantic native controls, visible keyboard focus, live error/status
 regions, responsive reflow, and reduced-motion support. Internal route changes move
 focus to the main landmark; initial load retains normal document tab order.
+
+## Self-registration
+
+The approved flow is **Register → Login → Play**. Supply username, separate public
+display name, password and exact confirmation. Username and display-name rules
+match the backend; new passwords require 15 Unicode code points minimum and 1024
+UTF-8 bytes maximum. Passwords are never trimmed/normalized; no composition rule or
+blocklist is added. Login keeps its legacy 1–1024-byte bounds. Shared pure credential
+validators prevent drift; display names use the existing 64-grapheme/control policy.
+
+The component-scoped `Registration` API class sends only username/displayName/
+password, with credentialed relative HttpClient and a ten-second timeout. Native
+Signal Forms `submitting()` covers the complete request; a disabled fieldset and
+computed button condition prevent duplicates. The component owns registration
+feedback only; `Session` remains the sole authenticated viewer store and is unchanged.
+Public-entry guards redirect authenticated users to `/play`. Unavailable profile
+checks show recovery rather than an anonymous form. Destroyed/obsolete callbacks
+cannot publish success or navigate. No password is transferred to Login.
+
+Only a confirmed 201 shows **Account created**, clears the form/passwords, focuses
+the confirmation heading, and offers **Continue to sign in**. Registration sets no
+cookie or session. A 409 means username unavailable, never proof of account ownership.
+Network/500/503 failures explicitly say creation was not confirmed and may have
+succeeded: use Login with the chosen credentials or retry manually. No mutation is
+automatically resent. Retry-After blocks manual resubmission until its deadline.
+Registration quotas are separate from Login; see [capacity evidence](../README.md#registration-capacity).
+
+Login/Register share a small scoped SCSS module, semantic tokens and stable feedback
+pattern, not a component framework. Normal field messages reserve one line; status
+reserves two below the action. Long messages grow without clipping. Narrow containers
+reserve two button-label lines at enlarged text sizes. Keyboard skip navigation now
+focuses the main landmark without leaving nested routes through the document base URL.
+
+The browser image can run public registration acceptance with the same certificate,
+script/results mounts and container network used below, but a **writable private**
+SMOKE_DIR and no input credentials:
+
+```sh
+docker run --rm --network "container:$(dc ps -q frontend)" \
+  -v "$SMOKE_DIR:/smoke" \
+  -v "$PWD/frontend/.certs:/app/.certs:ro" \
+  -v "$PWD/frontend/scripts:/app/scripts:ro" \
+  -v "$PWD/frontend/test-results:/app/test-results" \
+  trivia-frontend-browser sh scripts/browser-smoke.sh scripts/register-browser-smoke.mjs
+```
+
+This creates random disposable accounts **through the browser UI**, verifies 201
+without a cookie, explicit Login, `/play`, reload and logout, canonical conflicts,
+mobile touch, keyboard/focus, and network/capacity feedback. A real COMMIT followed
+by a dropped response verifies truthful uncertain-outcome recovery. Layout-only 409s
+are intercepted to compare Register-button geometry across idle, pending, validation,
+correction and repeated conflicts at 1280/375px and 320px with 200% text. Run against
+a controlled development/test database, not a public deployment. It writes private
+credentials.json (for the existing auth/transport probes) and players.json (exact
+fixture IDs for cleanup) to SMOKE_DIR. Remove only those fixtures afterward, revoke
+remaining test sessions, and delete credentials; never delete unrelated Players.
+
+Verification: 74 Angular + 3 proxy tests; full backend suite 305 tests, all zero
+failed/skipped, through Docker. Real Chromium registration, existing authentication
+and Origin/polling/WebSocket smoke are required; screenshots are under ignored
+test-results. Human screen-reader speech review remains outstanding; no complete
+WCAG compliance claim is made. No Match/Lobby/gameplay/History UI is added.
 
 ## Versions and checks
 
@@ -152,8 +214,8 @@ dc logs frontend backend
 dc stop
 ```
 
-`typecheck` uses Angular compiler strict/template checks. `test` runs 44 focused
-Angular tests (22 session/HTTP/concurrency, 8 routing/shell, 14 Login form) with
+`typecheck` uses Angular compiler strict/template checks. `test` runs 74 focused
+Angular tests (22 session/HTTP/concurrency, 8 routing/shell, 14 Login form, 30 Register) with
 CLI-default Vitest, plus three Node proxy-boundary regressions. It does not establish
 future feature correctness. Build also compiles strict templates.
 ESLint covers TypeScript, Angular HTML accessibility, and tooling JavaScript.
@@ -179,10 +241,10 @@ logout invalidation/socket disconnect, and anonymous, null/opaque, disallowed
 same-site and cross-site Origin rejection. No Match commands or subscriptions are
 created. Wire headers are captured using CDP and logged with cookie values redacted.
 
-Use a controlled pre-provisioned disposable account and an outside-repository JSON
+Use a controlled registered or pre-provisioned disposable account and an outside-repository JSON
 file containing exactly username/password. Do not embed credentials in source or
 committed configuration. Provisioning remains internal; the root README describes
-migration and identity prerequisites. This probe exercises transport directly, independently of the Login UI; provisioning stays internal.
+migration and identity prerequisites. This probe exercises transport directly, independently of the Login UI; internal provisioning is not a public API.
 
 ```sh
 docker build --target browser -t trivia-frontend-browser frontend
@@ -335,8 +397,9 @@ Executed in Docker with Node 26.13.0/npm 11.20.0, using both root Compose files:
   `socket-origin.test.ts` regressions passed **49 / 49, zero skipped**. No full backend
   suite rerun is claimed. Backend/proxy/Compose source and security policy are unchanged.
 
-Before broader integrated demo work, the development database owner must apply the
-already accepted migrations using the existing root README workflow. Stage 2 has not
-silently changed that database's schema. Disposable test accounts/database/credential
+Stage 2.5 preparation subsequently backed up the Compose-owned development database,
+verified no canonical conflicts/invalid usernames, and applied accepted migrations
+002–003. The ledger is now 001–003 and the existing Player count was preserved. No
+registration migration or persistent-volume reset was needed. Disposable test accounts/database/credential
 files are removed after verification, and the original runtime database connection
 is restored. No Match, lobby, gameplay, or History UI has been added.

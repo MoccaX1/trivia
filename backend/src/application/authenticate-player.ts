@@ -42,7 +42,7 @@ function dummyHash(): Promise<string> {
   return (dummy ??= hashPassword('non-user dummy verification input'));
 }
 
-/** Controlled internal/test provisioning only; no public registration endpoint. */
+/** Trusted account creation; public registration adds validation and bounded admission. */
 export async function provisionPlayer(
   repository: Pick<PlayerCredentials, 'createPlayerWithCredential'>,
   username: string,

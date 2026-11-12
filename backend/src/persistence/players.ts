@@ -73,7 +73,7 @@ export class PlayerRepository {
     }
   }
 
-  /** Internal provisioning only; the caller supplies an already-hashed password. */
+  /** Trusted provisioning boundary; the caller supplies an already-hashed password. */
   async createPlayerWithCredential(
     username: string,
     displayName: string,

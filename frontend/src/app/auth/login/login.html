@@ -9,7 +9,7 @@
     @if (state.status === 'anonymous' || session.pending() === 'login') {
       <h2>Sign in</h2>
       <p class="hint" id="account-help">
-        Use your pre-provisioned account. Need access? Ask the demo organizer.
+        Sign in with your Trivia account. New here? Create an account below.
       </p>
       <form (submit)="signIn($event)" novalidate aria-describedby="account-help">
         <div class="field">
@@ -55,6 +55,7 @@
           }
         </div>
       </form>
+      <a class="form-link" routerLink="/register">Create an account</a>
     } @else if (state.status === 'unavailable') {
       <h2>Let’s check your session</h2>
       <p class="feedback" role="alert">{{ state.issue.message }}</p>

@@ -82,7 +82,10 @@ It never merges/deletes accounts or changes migration 001/Player UUIDs. Player
 provisioning validates Unicode display names at 1–64 extended grapheme clusters,
 rejecting blank/unsafe controls without trimming stored input. Legacy display rows
 remain untouched; no incompatible ICU-dependent SQL constraint is introduced.
-Process-local sessions add no durable table. Password-creation policy stays open.
+Process-local sessions add no durable table. Stage 2.5 self-registration reuses these
+existing tables/transaction without a new migration. Public password creation requires
+15 Unicode code points minimum and 1024 UTF-8 bytes maximum without normalization,
+composition rules or a blocklist; legacy Login stays unchanged. See [API §2.2](api-contract.md#22-self-registration-stage-25).
 
 Store secure password hashes, never plaintext. Gameplay/History does not join
 credentials for identity. Email, OAuth, MFA, recovery, and generic credential

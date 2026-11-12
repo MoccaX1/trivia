@@ -1,0 +1,118 @@
+<section class="entry" aria-labelledby="register-title">
+  <div class="introduction">
+    <p class="eyebrow">A little curiosity goes a long way.</p>
+    <h1 id="register-title">Make yourself<br />at home.</h1>
+    <p class="description">Your name. Your curiosity. A place at the table.</p>
+  </div>
+  <div class="sign-in">
+    @let state = session.state();
+    @let outcome = result();
+    @if (state.status === 'anonymous' && outcome?.status === 'created') {
+      <h2 #createdHeading tabindex="-1">Account created</h2>
+      <p class="hint">
+        You’re ready to sign in. Creating an account does not sign you in automatically.
+      </p>
+      <a class="continue" routerLink="/login">Continue to sign in</a>
+    } @else if (state.status === 'anonymous') {
+      <h2>Create an account</h2>
+      <p class="hint" id="register-help">
+        Your public display name is visible to other players. Use at least 15 characters for your
+        password.
+      </p>
+      <form (submit)="register($event)" novalidate aria-describedby="register-help">
+        <fieldset class="details" [disabled]="isSubmitting()" aria-label="Account details">
+          <div class="field">
+            <label for="register-username">Username</label>
+            <input
+              id="register-username"
+              type="text"
+              autocomplete="username"
+              [formField]="fields.username"
+              [attr.aria-invalid]="!!errors().username"
+              [attr.aria-describedby]="errors().username ? 'register-username-error' : null"
+              autocapitalize="none"
+              spellcheck="false"
+            />
+            <div class="field-feedback">
+              @if (errors().username; as message) {
+                <p class="field-error" id="register-username-error">{{ message }}</p>
+              }
+            </div>
+          </div>
+          <div class="field">
+            <label for="register-displayName">Public display name</label>
+            <input
+              id="register-displayName"
+              type="text"
+              autocomplete="nickname"
+              [formField]="fields.displayName"
+              [attr.aria-invalid]="!!errors().displayName"
+              [attr.aria-describedby]="errors().displayName ? 'register-displayName-error' : null"
+            />
+            <div class="field-feedback">
+              @if (errors().displayName; as message) {
+                <p class="field-error" id="register-displayName-error">{{ message }}</p>
+              }
+            </div>
+          </div>
+          <div class="field">
+            <label for="register-password">Password</label>
+            <input
+              id="register-password"
+              type="password"
+              autocomplete="new-password"
+              [formField]="fields.password"
+              [attr.aria-invalid]="!!errors().password"
+              [attr.aria-describedby]="errors().password ? 'register-password-error' : null"
+            />
+            <div class="field-feedback">
+              @if (errors().password; as message) {
+                <p class="field-error" id="register-password-error">{{ message }}</p>
+              }
+            </div>
+          </div>
+          <div class="field">
+            <label for="register-confirmPassword">Confirm password</label>
+            <input
+              id="register-confirmPassword"
+              type="password"
+              autocomplete="new-password"
+              [formField]="fields.confirmPassword"
+              [attr.aria-invalid]="!!errors().confirmPassword"
+              [attr.aria-describedby]="
+                errors().confirmPassword ? 'register-confirmPassword-error' : null
+              "
+            />
+            <div class="field-feedback">
+              @if (errors().confirmPassword; as message) {
+                <p class="field-error" id="register-confirmPassword-error">{{ message }}</p>
+              }
+            </div>
+          </div>
+        </fieldset>
+        <button type="submit" [disabled]="submitDisabled()" [attr.aria-busy]="isSubmitting()">
+          {{ isSubmitting() ? 'Creating…' : 'Register' }}
+        </button>
+        <div class="feedback" role="status" aria-atomic="true">
+          @if (feedback(); as message) {
+            <p [class.feedback-error]="!isSubmitting()">{{ message }}</p>
+          }
+        </div>
+      </form>
+      <a class="form-link" routerLink="/login">Already have an account? Sign in</a>
+    } @else if (state.status === 'unavailable') {
+      <h2>Let’s check your session</h2>
+      <p class="feedback" role="alert">{{ state.issue.message }}</p>
+      <p class="hint">
+        Your session may still be active. We’ll check before creating another account.
+      </p>
+      <button type="button" (click)="session.check()" [disabled]="session.retryBlocked()">
+        Check session again
+      </button>
+      <a class="form-link" routerLink="/login">Back to sign in</a>
+    } @else {
+      <h2>One moment</h2>
+      <p role="status">Checking your session…</p>
+    }
+  </div>
+</section>

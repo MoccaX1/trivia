@@ -1,11 +1,12 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { form, FormField, readonly, required, submit, validate } from '@angular/forms/signals';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
+import { passwordBytesError, usernameError } from '../credential-validation.js';
 import { Session } from '../session.js';
 
 @Component({
   selector: 'app-login',
-  imports: [FormField],
+  imports: [FormField, RouterLink],
   templateUrl: './login.html',
   styleUrl: './login.scss',
 })
@@ -17,23 +18,14 @@ export class Login {
     readonly(path, { when: () => !!this.session.pending() });
     required(path.username, { message: 'Enter your username.' });
     validate(path.username, ({ value }) => {
-      const text = value();
-      return text && (text.length > 128 || /[^A-Za-z0-9_.-]/.test(text))
-        ? {
-            kind: 'format',
-            message:
-              text.length > 128
-                ? 'Use at most 128 characters.'
-                : 'Use A–Z, a–z, 0–9, _ . -; no spaces.',
-          }
-        : undefined;
+      const message = usernameError(value());
+      return message ? { kind: 'format', message } : undefined;
     });
     required(path.password, { message: 'Enter your password.' });
-    validate(path.password, ({ value }) =>
-      new TextEncoder().encode(value()).length > 1024
-        ? { kind: 'format', message: 'Use at most 1024 UTF-8 bytes.' }
-        : undefined,
-    );
+    validate(path.password, ({ value }) => {
+      const message = passwordBytesError(value());
+      return message ? { kind: 'format', message } : undefined;
+    });
   });
 
   protected readonly isSigningIn = computed(() => this.fields().submitting());

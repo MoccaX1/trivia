@@ -65,6 +65,7 @@ fail earlier still, with generic 400.
 | Method/path             | Session      | Origin                                    | Input                             | Success                  | Cookie/activity                                                        |
 | ----------------------- | ------------ | ----------------------------------------- | --------------------------------- | ------------------------ | ---------------------------------------------------------------------- |
 | `GET /health`           | None         | No application Origin guard               | None                              | 200 `{ "status": "ok" }` | No cookie/activity; no explicit no-store or credentialed CORS headers  |
+| `POST /auth/register` | Not required | Mandatory approved Origin | Exact JSON username/displayName/password | 201 `PlayerResponse` | Account COMMIT only; no session/cookie/activity |
 | `POST /auth/login`      | Not required | Mandatory approved Origin                 | JSON username/password            | 200 `PlayerResponse`     | Creates a new independent session cookie                               |
 | `POST /auth/logout`     | Required     | Mandatory approved Origin                 | JSON; send `{}` (body is ignored) | 204, no body             | Revokes current session, clears its cookie and disconnects its sockets |
 | `GET /auth/profile`     | Required     | Missing allowed; present must be approved | None                              | 200 `PlayerResponse`     | No refresh/replacement cookie                                          |
@@ -72,9 +73,9 @@ fail earlier still, with generic 400.
 | `GET /history/:matchId` | Required     | Missing allowed; present must be approved | UUID path; no query parameters    | 200 HistoryDetail        | No refresh/replacement cookie                                          |
 
 `/health` is liveness, not proof of authentication, database readiness, timer health
-or completion durability. No registration, refresh-token, password-reset, current
-live-Match HTTP read or gameplay mutation HTTP endpoint exists. Account provisioning
-is internal/test-only; the frontend needs pre-provisioned accounts.
+or completion durability. No refresh-token, password-reset, current live-Match HTTP read or gameplay mutation
+HTTP endpoint exists. Public self-registration is described below; trusted internal/test
+provisioning remains available without becoming an additional public operation.
 
 **Preflight:** `OPTIONS /auth/*` requires an approved Origin and allows requested
 methods GET/POST. `OPTIONS /history` and `OPTIONS /history/:matchId` allow GET only.
@@ -153,6 +154,55 @@ Unknown users count as failures; successful logins/outages do not erase abuse hi
 429 uses `RATE_LIMITED` and Retry-After: 900; saturation/capacity or auth infrastructure
 failure uses 503 `AUTH_UNAVAILABLE` and Retry-After: 1. These are retry hints, not
 permission for an unlimited client retry loop.
+
+### 2.2 Self-registration (Stage 2.5)
+
+`POST /auth/register` requires exactly `{ username, displayName, password }`, all
+strings in a JSON object, Content-Type application/json, maximum 4096 body bytes.
+Unknown properties (including confirmPassword or actor IDs), arrays, missing fields,
+and invalid types reject. Username constraints/canonicalization are unchanged from
+section 2.1. Public display name is supplied separately: 1–64 extended grapheme
+clusters, nonblank, without unsafe controls/surrogates/directional overrides;
+permitted spaces and composition are preserved. Names need not be unique.
+
+New registration passwords require **at least 15 Unicode code points** and **at most
+1024 UTF-8 bytes**, without trimming, normalization, composition requirements, or a
+password blocklist. Confirmation is frontend-only. These creation rules do not
+change Login's 1–1024-byte resource bounds or previously provisioned credentials.
+The existing salted Argon2id implementation is unchanged.
+
+Success is **201 `PlayerResponse`**, only after the Player/Credential transaction's
+COMMIT is acknowledged. It does not create/refresh a session, issue/replace/clear a
+cookie, or switch an existing authenticated Player. Use **Register → Login → Play**;
+Login must be a separate deliberate action. Every registration response is no-store.
+The database's canonical CHECK/UNIQUE constraint arbitrates concurrent names; a
+losing transaction rolls back its Player row and returns **409 USERNAME_TAKEN**,
+without existing Player details. M1 explicitly accepts this enumeration trade-off.
+
+Registration uses the same mandatory Origin/TLS/JSON boundary as Login. Missing,
+null, disallowed and cross-site Origins reject; no Socket.IO GET exception applies.
+Independent registration limits are **20 admitted attempts/trusted IP/15 minutes**
+and **100 admitted attempts/process/hour**, counting malformed bodies after transport/
+Origin checks. Rejections return 429 RATE_LIMITED and Retry-After until both windows
+permit admission. Limiter key cardinality is capped at 1000, with expiry/cleanup;
+the global window also bounds admitted distinct IPs. At most **two registration
+operations** may be active, including hashing and persistence; excess capacity or
+closed/unavailable infrastructure returns 503 AUTH_UNAVAILABLE, Retry-After: 1.
+There is no application wait queue. Existing Login limits remain independent.
+
+A disconnected client cannot cancel native Argon2 or an already admitted COMMIT;
+its slot remains occupied until work settles. Shutdown stops admission, clears
+limiter timers, and drains admitted registration work before database shutdown.
+Quotas are process-local and reset on restart. They limit abuse but do not prevent
+all account spam or provide distributed/production anti-bot protection. Benchmark
+measurements and rationale are in the [root README](../README.md#registration-capacity).
+
+Invalid input uses 400 INVALID_REQUEST; body/type failures retain existing 413/415
+codes; unexpected failures use 500 INTERNAL_ERROR. Known storage failures use 503
+AUTH_UNAVAILABLE. A network error, timeout, or storage failure can follow a successful
+COMMIT: **do not assume no account exists, automatically resend registration, or
+claim success without 201**. Offer Login with the chosen credentials or a manual
+retry. A later 409 does not prove that the existing account belongs to this user.
 
 ## 3. History HTTP contract
 
@@ -595,6 +645,7 @@ an additional wire error event or guarantee of eventual publication.
 | HTTP/code                 | Meaning                                                          |
 | ------------------------- | ---------------------------------------------------------------- |
 | 400 `INVALID_REQUEST`     | Invalid login/query/UUID/cursor/JSON or malformed URL component  |
+| 409 `USERNAME_TAKEN` | Registration username unavailable; no existing identity details |
 | 401 `INVALID_CREDENTIALS` | Login username/password incorrect or unknown                     |
 | 401 `UNAUTHENTICATED`     | Session missing, invalid, expired or revoked                     |
 | 403 `ORIGIN_FORBIDDEN`    | Origin or required secure/explicit loopback transport rejected   |
@@ -671,7 +722,7 @@ extension or recovery. See [accepted limitations](known-issues.md#7-accepted-m1-
 
 ## 10. Complete frontend integration sequence
 
-Use two provisioned accounts in separate browser profiles/devices for two Players.
+Use two registered or pre-provisioned accounts in separate browser profiles/devices for two Players.
 Two same-host tabs normally share the cookie, so they do not create independent
 Player identities merely by opening two sockets. The server permits multiple
 sessions, but the browser manages which host cookie subsequent requests present.

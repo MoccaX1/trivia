@@ -220,6 +220,23 @@ try {
   assert.equal((await connectProbe(opaqueFrame, { transports: ['polling'] })).status, 'denied');
   assert.equal((await connectProbe(opaqueFrame, { transports: ['websocket'] })).status, 'denied');
   assert.equal(
+    await opaqueFrame.evaluate(async (origin) => {
+      try {
+        await fetch(origin + '/auth/register', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    }, origin),
+    false,
+  );
+
+  assert.equal(
     await page.evaluate(async () => {
       const disconnected = new Promise((resolve) => {
         const timer = setTimeout(() => resolve(false), 5000);
@@ -268,6 +285,32 @@ try {
   const crossSite = await context.newPage();
   await observe(crossSite);
   await crossSite.goto('https://127.0.0.1:4443');
+  for (const target of [disallowed, crossSite]) {
+    assert.equal(
+      await target.evaluate(async (origin) => {
+        try {
+          await fetch(origin + '/auth/register', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      }, origin),
+      false,
+    );
+  }
+  for (const value of ['null', 'https://localhost:4443', 'https://127.0.0.1:4443']) {
+    const denied = await fetch(origin + '/auth/register', {
+      method: 'POST',
+      headers: { Origin: value, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    assert.equal(denied.status, 403);
+  }
   await crossSite.addScriptTag({ content: socketBundle });
   assert.equal((await connectProbe(crossSite, { transports: ['polling'] })).status, 'denied');
   assert.equal((await connectProbe(crossSite, { transports: ['websocket'] })).status, 'denied');

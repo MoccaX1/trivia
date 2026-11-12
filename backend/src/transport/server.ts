@@ -114,6 +114,7 @@ export function createServer({
       await lobby?.coordinator.shutdown();
       await completions?.close();
     } finally {
+      await auth?.registration?.close();
       auth?.login.close();
       try {
         await auth?.sessions.close();

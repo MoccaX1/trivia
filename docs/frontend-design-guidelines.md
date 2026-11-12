@@ -178,7 +178,7 @@ Preserve a stable reading and keyboard order when columns change.
 
 | Area | Responsive priorities |
 | --- | --- |
-| Landing and login | Product-oriented composition may use larger titles and more whitespace. Keep sign-in easy to find and form fields usable with the on-screen keyboard. Do not promise registration or account recovery absent from M1. |
+| Landing and login | Product-oriented composition may use larger titles and more whitespace. Keep sign-in easy to find and form fields usable with the on-screen keyboard. Provide the approved Register → Login path; do not promise account recovery. |
 | Lobby | Prioritize Match identity, player list, Host controls, connection status, and supported join/leave actions. Allow long IDs/names to wrap without displacing the main action. |
 | Gameplay | Stack choices on narrow screens; add columns only when text and touch targets remain comfortable. Keep timer, question progress, and submission state visible near the question. Reduce secondary material before reducing readability. Avoid unnecessary timed scrolling. |
 | History | Use scannable Match summaries, readable final standings, and ordered question review. Provide accessible navigation through results and pagination; do not require wide tables for essential information. |
@@ -311,8 +311,10 @@ and transport configuration; do not duplicate or extend the API here.
 - **Authentication:** use the approved server-managed HttpOnly session and
   credentialed requests. Do not store a bearer token or invent client identity.
   Clear viewer-private state on logout/account change and replace the authenticated
-  socket appropriately. Accounts are pre-provisioned; no registration/reset UI is
-  implied. Do not use silent requests to invent session keep-alive behavior.
+  socket appropriately. Stage 2.5 supports explicit self-registration as well as pre-provisioned accounts;
+  creation confirms an account, not an authenticated session. Public display name is
+  supplied separately. Keep native Signal Forms submission, stable feedback, and an
+  explicit Continue to sign in action. No password-reset UI is implied. Do not use silent requests to invent session keep-alive behavior.
 - **Snapshots:** apply newer full viewer-specific snapshots using one version
   tracker per Match across lobby/gameplay events, scoped to the authenticated
   viewer. Ignore older/equal versions. Gaps are allowed; ACK versions must not

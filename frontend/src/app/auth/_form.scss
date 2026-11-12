@@ -1,0 +1,184 @@
+:host {
+  display: block;
+}
+.entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: center;
+}
+.introduction {
+  max-width: 38rem;
+}
+.eyebrow {
+  color: var(--color-accent);
+  font-size: var(--text-small);
+  font-weight: 600;
+  margin: 0 0 var(--space-5);
+}
+h1 {
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  font-weight: 600;
+  margin: 0 0 var(--space-5);
+  overflow-wrap: anywhere;
+}
+.description {
+  font-size: var(--text-large);
+  color: var(--color-text-secondary);
+  max-width: 32ch;
+  margin: 0;
+}
+.sign-in {
+  container-type: inline-size;
+  width: 100%;
+  max-width: 26rem;
+  padding: var(--space-6);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+}
+h2 {
+  margin: 0 0 var(--space-3);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.hint {
+  font-size: var(--text-small);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-5);
+}
+form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+.field {
+  display: grid;
+  gap: var(--space-2);
+}
+label {
+  font-weight: 600;
+  font-size: var(--text-small);
+}
+input {
+  min-width: 0;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: var(--space-3);
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-small);
+}
+input[aria-invalid='true'] {
+  border-color: var(--color-error);
+}
+// Reserve ordinary validation/status lines without clipping longer messages.
+.field-feedback {
+  min-block-size: 1lh;
+  font-size: var(--text-small);
+}
+.field-error,
+.feedback-error {
+  color: var(--color-error);
+}
+.field-error {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.feedback {
+  min-block-size: 2lh;
+  font-size: var(--text-small);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.feedback p {
+  margin: 0;
+}
+button {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  min-height: 2.75rem;
+  padding: var(--space-3) var(--space-4);
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-small);
+  cursor: pointer;
+  transition: background-color var(--motion-feedback) ease-out;
+}
+button:hover:enabled {
+  background: var(--color-accent-hover);
+}
+button:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.secondary {
+  color: var(--color-accent);
+  background: var(--color-surface);
+}
+.secondary:hover:enabled {
+  color: var(--color-on-accent);
+}
+.recovery {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+@media (width >= 52rem) {
+  .entry {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
+  .sign-in {
+    justify-self: end;
+  }
+}
+@media (width < 36rem) {
+  .entry {
+    gap: var(--space-6);
+  }
+  .sign-in {
+    padding: min(var(--space-5), 6vw);
+  }
+}
+
+// Enlarged text can wrap the pending label; reserve two lines only when needed.
+@container (inline-size < 14em) {
+  button[type='submit'] {
+    min-block-size: calc(2lh + 2 * var(--space-3) + 2px);
+  }
+}
+
+.details {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-4);
+}
+.form-link {
+  color: var(--color-accent);
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  margin-top: var(--space-3);
+}
+.continue {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  border-radius: var(--radius-small);
+  text-decoration: none;
+  font-weight: 600;
+}

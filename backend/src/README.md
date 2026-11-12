@@ -127,7 +127,8 @@ server-generated UUID; `password_credential.player_id` is both PK and FK, and
 username has a UNIQUE constraint. `application/password.ts` hashes and verifies
 Argon2id; `authenticatePlayer` returns only a trusted Player profile or the same
 `invalid_credentials` result for unknown username and wrong password.
-`provisionPlayer` is for controlled internal/test setup, not a public endpoint.
+`provisionPlayer` is a trusted primitive, reused behind the Stage 2.5 registration
+service's public validation/admission boundary; it is not itself a public endpoint.
 No schema is applied during backend startup; `npm run migrate` is explicit.
 
 Slice 2 exposes SessionStore.resolve/watch without idle refresh, and act(token,

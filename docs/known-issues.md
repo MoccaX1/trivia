@@ -24,12 +24,12 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 | LIM | 0 | 4 | 0 | 4 |
 | RISK | 1 | 0 | 4 | 5 |
 | DEBT | 2 | 0 | 0 | 2 |
-| DEC | 8 | 0 | 5 | 13 |
+| DEC | 7 | 0 | 6 | 13 |
 | TEST | 3 | 0 | 2 | 5 |
 | OPS | 2 | 0 | 1 | 3 |
 | DEF | 0 | 2 | 3 | 5 |
 
-Total: **44** records; **6 ACCEPTED**, **16 OPEN**, **22 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **44** records; **6 ACCEPTED**, **15 OPEN**, **23 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
@@ -46,7 +46,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 | [RISK-004](#risk-004) | Development dependency advisories remain unremediated | OPEN | MEDIUM | before public deployment |
 | [DEBT-001](#debt-001) | Repository guidance contains obsolete implementation descriptions | OPEN | LOW | later hardening |
 | [DEBT-002](#debt-002) | Competition ranking clarification is not fully in frozen baseline | OPEN | LOW | current demo |
-| [DEC-005](#dec-005) | Password creation policy remains undecided | OPEN | UNDETERMINED | undecided |
+| [DEC-005](#dec-005) | Public registration/password creation policy approved | RESOLVED | UNDETERMINED | Stage 2.5 |
 | [DEC-006](#dec-006) | Host departure and active disconnect policy | OPEN | UNDETERMINED | future design |
 | [DEC-007](#dec-007) | Enabled earlyClose behavior | OPEN | UNDETERMINED | future design |
 | [DEC-008](#dec-008) | Other SQL identifiers and deletion/retention policy | OPEN | UNDETERMINED | undecided |
@@ -323,16 +323,14 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 
 <a id="dec-005"></a>
 
-### DEC-005 — Password creation policy remains undecided
+### DEC-005 — Public registration and password creation policy approved
 
-- **Category / status:** DEC / OPEN. **Severity / priority:** UNDETERMINED / UNDECIDED.
-- **Component / phase:** Provisioning; Slice 1/future authentication. **Target:** undecided.
-- **Evidence:** [Database §4.2](database-design.md#42-password_credential); [provisionPlayer](../backend/src/application/authenticate-player.ts); [hashing](../backend/src/application/password.ts).
-- **Concern:** Argon2id is implemented; password length/complexity and account lifecycle are not specified.
-- **Policy / status:** Internal/test provisioning only; no registration/reset.
-- **Impact:** Future provisioning rules must agree with accepted login input bounds.
-- **Next action:** Approve creation policy when needed; keep Unicode/size transport protection distinct.
-- **Related:** DEC-004.
+- **Category / status:** DEC / RESOLVED for public self-registration (Stage 2.5).
+- **Evidence:** [API §2.2](api-contract.md#22-self-registration-stage-25), [registration service](../backend/src/application/registration.ts), [tests](../backend/tests/registration.test.ts).
+- **Approved decisions:** DEC-REG-01: Register → Login → Play, no automatic session. DEC-REG-02: explicit public display name. DEC-REG-03: 15 Unicode code points minimum, 1024 UTF-8 bytes maximum, exact passwords; no composition rule or blocklist. DEC-REG-04: 409 USERNAME_TAKEN with the accepted enumeration trade-off. DEC-REG-05: benchmark-based bounded admission.
+- **Implementation:** Existing Argon2id and atomic Player/Credential provisioning are reused. Login retains legacy 1–1024-byte bounds. Two registration slots, 20 attempts/IP/15 minutes and 100/process/hour; expiry, bounded state, fail-fast saturation and shutdown drain.
+- **Intentional limits:** Process-local quotas reset on restart; no complete spam/Internet abuse guarantee. Lost responses or COMMIT acknowledgements can leave a created account with an unconfirmed client outcome. No automatic retry, login, password recovery or account administration is added.
+- **Next action:** Rebenchmark when hardware/container limits change; reassess abuse controls before broader exposure. Trusted internal/test provisioning remains distinct from public registration policy.
 
 <a id="dec-006"></a>
 
@@ -557,9 +555,9 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Category / status:** DEF / ACCEPTED. **Severity / priority:** UNDETERMINED / UNDECIDED.
 - **Component / phase:** Authentication; beyond current M1. **Target:** future design.
 - **Evidence:** [HLD §12](HLD_Component_Diagram.md#12-authentication); [Database §4.2](database-design.md#42-password_credential).
-- **Concern:** No public registration, password recovery, OAuth, email verification or MFA is implemented.
-- **Policy / status:** Advanced mechanisms are outside current M1; internal/test provisioning exists.
-- **Impact:** M1 accounts require controlled provisioning; no self-service recovery promise.
+- **Concern:** Public self-registration is implemented in Stage 2.5. Password recovery, OAuth, email verification and MFA remain unimplemented.
+- **Policy / status:** Account recovery and advanced mechanisms remain outside M1; self-registration and trusted internal/test provisioning coexist.
+- **Impact:** New Players can self-register; there is still no self-service account recovery promise.
 - **Next action:** Keep excluded unless explicitly approved; do not add a CLI merely for completeness.
 - **Related:** DEC-005.
 
@@ -585,7 +583,7 @@ Stale/cancelled callbacks are **design-compliant informational behavior**, not a
 
 ## 8. Deferred design decisions and future recovery considerations
 
-DEC-001–004 are decided by the approved Slice 2 contract in LLD §5.7; DEC-005 password-creation policy remains open. Earlier discussion recommendations were superseded only by explicit Slice 2 approval. DEC-006–013 capture gameplay, persistence, capacity, content and recovery gaps. No automatic retries, rollback, deadline extensions or fatal shutdown policy follows from this registry.
+DEC-001–004 are decided by the approved Slice 2 contract in LLD §5.7; DEC-005 public registration/password-creation policy is approved for Stage 2.5. Earlier discussion recommendations were superseded only by explicit Slice 2 approval. DEC-006–013 capture gameplay, persistence, capacity, content and recovery gaps. No automatic retries, rollback, deadline extensions or fatal shutdown policy follows from this registry.
 
 Recovery design must address accepted submissions, attempts, timing, exact scores, command idempotency, timer reconciliation and fairness during inability to submit. Distinguish in-process scheduler failure from process restart. Restoration alone does not authorize resume, abort, compensation or a new deadline (DEC-012).
 

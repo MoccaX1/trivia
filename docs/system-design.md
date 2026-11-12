@@ -1228,7 +1228,10 @@ grapheme clusters and preserve spaces/composition; blank/unsafe controls reject.
 
 M1 uses opaque process-local server sessions with 256-bit random bearer tokens,
 30-minute sliding idle and 12-hour absolute expiration. Multiple sessions coexist;
-logout revokes only the current session; restart requires login. Only intentional
+logout revokes only the current session; restart requires login. Stage 2.5 adds
+self-registration using atomic existing identity persistence and the approved public
+password policy: explicit display name, 15-code-point minimum/1024-byte maximum,
+unchanged Argon2id, no blocklist or automatic Login. See [API §2.2](api-contract.md#22-self-registration-stage-25). Only intentional
 authenticated application actions refresh idle, never polling or heartbeats.
 
 HTTP login/logout/profile and Socket.IO resolve identity from the server session.

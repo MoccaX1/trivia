@@ -1408,8 +1408,10 @@ no tamper-evidence, additional schema, repair or reconciliation policy is implie
   At most four concurrent lookup/verification operations, no queue; saturation returns
   503 with Retry-After. Expire stale limiter data and bound key/cardinality growth.
 
-These are login resource bounds, not a password-creation policy. Gameplay Gateway,
-active reconnect/rejoin, registration and password recovery are outside this slice.
+These are login resource bounds, separate from the Stage 2.5 public creation policy
+in [API §2.2](api-contract.md#22-self-registration-stage-25). Registration reuses atomic
+provisioning with bounded admission and issues no session. Gameplay Gateway,
+active reconnect/rejoin and password recovery were outside the original Slice 2.
 History pagination follows the Slice 6 contract above. Do not create an HTTP gameplay bypass or expose
 mutable current Question Bank content as historical facts.
 
@@ -2383,7 +2385,7 @@ reconstruction, and all phase transitions using controlled time.
 - History HTTP pagination and derived participant count are settled in §5.7;
   preserve the approved chronological physical access path.
 - Permanent source Question/Choice lineage; snapshots remain independently reconstructable.
-- Authentication/session decisions are settled in §5.7; password-creation policy remains open.
+- Authentication/session decisions are settled in §5.7; Stage 2.5 public password-creation policy is defined in API §2.2.
 - Source-lineage identifier representations and deletion/retention policy remain
   unfrozen; Slice 5 approves Player/Match UUIDs and the documented composite keys.
 

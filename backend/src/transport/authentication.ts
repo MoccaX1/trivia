@@ -1,6 +1,8 @@
 import type { FastifyInstance, onRequestAsyncHookHandler } from 'fastify';
 import type { Server } from 'socket.io';
 import type { SessionStore } from '../application/sessions.js';
+import type { RegistrationService } from '../application/registration.js';
+import { PlayerPersistenceError } from '../persistence/players.js';
 import type { LoginService } from '../application/login.js';
 import { canonicalUsername } from '../application/player-identity.js';
 import { allowedOrigin, secureRequest, sessionCookie, sessionToken } from './auth-policy.js';
@@ -10,13 +12,14 @@ export interface Authentication {
   policy: AuthPolicy;
   sessions: SessionStore;
   login: LoginService;
+  registration?: RegistrationService;
 }
 export function installAuthentication(
   http: FastifyInstance,
   io: Server,
   auth: Authentication,
 ): void {
-  const { policy, sessions, login } = auth;
+  const { policy, sessions, login, registration } = auth;
   // Route-level onRequest runs after routing and before parsing. Use Fastify's
   // registered route identity, so encoded spellings receive identical protection.
   const protectAuthRoute: onRequestAsyncHookHandler = async (request, reply) => {
@@ -47,6 +50,16 @@ export function installAuthentication(
         .header('access-control-allow-headers', 'Content-Type')
         .code(204)
         .send();
+    }
+    if (request.method === 'POST' && request.routeOptions.url === '/auth/register') {
+      const admission = registration?.admitIp(request.ip);
+      if (!registration || admission)
+        return reply
+          .code(admission?.status === 'rate_limited' ? 429 : 503)
+          .header('retry-after', admission?.retryAfter ?? 1)
+          .send({
+            code: admission?.status === 'rate_limited' ? 'RATE_LIMITED' : 'AUTH_UNAVAILABLE',
+          });
     }
     if (request.method === 'POST' && request.routeOptions.url === '/auth/login') {
       const admission = login.admitIp(request.ip);
@@ -107,6 +120,40 @@ export function installAuthentication(
       } catch {
         request.log.error({ code: 'AUTH_INFRASTRUCTURE_FAILURE' }, 'Authentication unavailable');
         return reply.code(503).header('retry-after', '1').send({ code: 'AUTH_UNAVAILABLE' });
+      }
+    },
+  );
+  http.post(
+    '/auth/register',
+    { onRequest: protectAuthRoute, bodyLimit: 4096 },
+    async (request, reply) => {
+      if (!registration)
+        return reply.code(503).header('retry-after', '1').send({ code: 'AUTH_UNAVAILABLE' });
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      const disconnect = () => {
+        if (!reply.raw.writableFinished) abort();
+      };
+      request.raw.once('aborted', abort);
+      reply.raw.once('close', disconnect);
+      try {
+        const result = await registration.register(request.body, controller.signal);
+        if (result.status === 'invalid') return reply.code(400).send({ code: 'INVALID_REQUEST' });
+        if (result.status === 'busy')
+          return reply.code(503).header('retry-after', '1').send({ code: 'AUTH_UNAVAILABLE' });
+        if (result.status === 'created') return reply.code(201).send({ player: result.player });
+      } catch (error) {
+        if (error instanceof PlayerPersistenceError) {
+          if (error.code === 'USERNAME_TAKEN')
+            return reply.code(409).send({ code: 'USERNAME_TAKEN' });
+          request.log.error({ code: 'REGISTRATION_STORAGE_FAILURE' }, 'Registration unavailable');
+          return reply.code(503).header('retry-after', '1').send({ code: 'AUTH_UNAVAILABLE' });
+        }
+        request.log.error({ code: 'REGISTRATION_INTERNAL_FAILURE' }, 'Registration unavailable');
+        return reply.code(500).send({ code: 'INTERNAL_ERROR' });
+      } finally {
+        request.raw.off('aborted', abort);
+        reply.raw.off('close', disconnect);
       }
     },
   );

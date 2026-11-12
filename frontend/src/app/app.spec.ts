@@ -111,5 +111,10 @@ describe('session-aware navigation and shell', () => {
     expect(element.querySelector('.skip-link')?.getAttribute('href')).toBe('#main-content');
     expect(element.querySelector('main')?.id).toBe('main-content');
     expect(element.querySelector('a[aria-label="Trivia home"]')).not.toBeNull();
+    const currentUrl = TestBed.inject(Router).url;
+    element.querySelector<HTMLAnchorElement>('.skip-link')!.click();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(element.querySelector('main'));
+    expect(TestBed.inject(Router).url).toBe(currentUrl);
   });
 });

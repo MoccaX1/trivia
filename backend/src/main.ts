@@ -4,6 +4,7 @@ import { readConfig } from './config.js';
 import { connectPostgres } from './persistence/postgres.js';
 import { createServer } from './transport/server.js';
 import { PlayerRepository } from './persistence/players.js';
+import { RegistrationService } from './application/registration.js';
 import { LoginService } from './application/login.js';
 import { MemorySessionStore } from './application/sessions.js';
 import { SystemClock, NodeMatchScheduler } from './runtime/match-time.js';
@@ -65,6 +66,7 @@ export async function runBackend(
             ),
           ),
           login: new LoginService(players, () => clock.now()),
+          registration: new RegistrationService(players, () => clock.now()),
         },
         lobby: { coordinator, players },
         completions,

@@ -33,4 +33,9 @@ export class App {
         });
       });
   }
+  protected skipToContent(event: Event): void {
+    // The document base is '/', so a bare fragment would leave a nested route.
+    event.preventDefault();
+    this.document.getElementById('main-content')?.focus();
+  }
 }

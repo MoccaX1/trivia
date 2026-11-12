@@ -112,7 +112,8 @@ docker compose -f compose.backend.yml --env-file backend/.env --profile tools ru
 The tools image builds before applying migrations. Repeating the command is safe: applied SQL is tracked with a checksum;
 changed or unknown migration versions fail instead of being replayed. The migrations
 create `player` and `password_credential` and enforce canonical usernames. Player IDs are server-generated UUIDs.
-No public registration or provisioning command is available.
+Players can use the Stage 2.5 `/register` frontend and `POST /auth/register` contract.
+No separate public provisioning command is available.
 
 PostgreSQL integration tests require a separate database whose name ends in `_test`.
 For the default local Compose credentials, create one once with
@@ -257,7 +258,8 @@ an approved data-remediation plan; never merge accounts automatically. Usernames
 are ASCII `[A-Za-z0-9_.-]`, 1–128 bytes, canonically lowercase and case-insensitive.
 Display names retain Unicode/spaces/emoji, use 1–64 extended graphemes, and reject
 blank or unsafe control content. Existing display rows are preserved without adding
-an ICU-dependent database constraint. No registration/provisioning HTTP route exists.
+an ICU-dependent database constraint. Stage 2.5 exposes only `POST /auth/register`
+for public creation; internal provisioning remains a separate trusted primitive.
 
 `POST /auth/login` takes exactly `{ username, password }` as JSON (4 KiB body;
 password 1–1024 UTF-8 bytes without normalization). It sets a cookie and returns
@@ -314,3 +316,53 @@ fixtures use fresh isolated schemas, including collision rollback and concurrent
 verify authenticated connections, provide `SMOKE_ORIGIN`, `SMOKE_USERNAME` and
 `SMOKE_PASSWORD` for an internally provisioned test account via an untracked local
 environment; keep those values out of command output and shell history.
+
+## Registration capacity
+
+Stage 2.5 uses Register → Login → Play. Registration creates no cookie/session and
+reuses the existing atomic Player/Credential transaction and Argon2id parameters.
+The approved password policy has no blocklist or composition rule. See
+[API §2.2](docs/api-contract.md#22-self-registration-stage-25) for exact contracts.
+
+Benchmark command inside the backend tools container: `npm run build` then
+`node scripts/benchmark-registration.mjs`. The benchmark is hash/verification-only,
+uses no database/accounts, and should be run separately from application traffic.
+Recorded environment: Node 26.13.0, Linux x64 Debian backend image, Intel i5-12400F,
+12 available logical CPUs, approximately 31 GiB host RAM, no configured container
+CPU/memory limit (`cpu.max=max`, `memory.max=max`), default native executor settings.
+Forty rounds/case, alternating admission order in mixed cases; each Login column
+uses four simultaneous verifications. RSS is sampled process peak in a shared
+benchmark process, not an isolated allocation delta. Event-loop p99 was about
+11 ms with a 10 ms monitor resolution. These are local measurements, not an SLO.
+
+| Registration operations | Login operations | Registration p95 ms | Login p95 ms | Peak RSS MiB | CPU core equivalents |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 4 | — | 20.33 | 140.4 | 3.91 |
+| 1 | 0 | 15.39 | — | 84.1 | 1.03 |
+| 2 | 0 | 15.29 | — | 103.5 | 2.00 |
+| 4 | 0 | 25.00 | — | 141.8 | 3.82 |
+| 1 | 4 | 32.98 | 30.75 | 141.9 | 3.01 |
+| 2 | 4 | 36.46 | 34.29 | 142.1 | 3.23 |
+| 4 | 4 | 40.63 | 39.19 | 142.1 | 3.91 |
+
+Selected **two registration slots**: lower standalone memory/CPU than four, bounded
+mixed latency and additional headroom. Existing four-slot Login behavior is unchanged;
+at most six application operations are admitted across both services. There is no
+registration application queue; the native executor may queue this bounded work.
+A disconnect does not release a slot while non-cancellable hashing/COMMIT is active.
+Shutdown stops admission and drains active work before pool shutdown.
+
+Separate quotas: **20 admitted attempts/IP/15 minutes**, enough for ten demo Players
+behind one NAT with a retry each, and **100 attempts/process/hour** to bound account
+and hashing growth. Invalid bodies and conflicts consume attempts after Origin/TLS
+checks. State expires and has a 1000-IP hard cap; global admission further bounds
+actual recent keys. Busy/unavailable work returns 503/Retry-After; quota exhaustion
+returns 429 with the remaining delay. These process-local limits reset on restart,
+can deny service when deliberately exhausted, and do not eliminate distributed spam.
+Rebenchmark/review quotas when hardware, container limits or exposure change.
+
+The development database was verified as local Compose-owned `trivia`, backed up
+outside Git, and migrated from 001 to 001–003 after collision/invalid-value checks
+both returned zero. Existing data was preserved; no registration migration was added.
+Use a separately verified `*_test` database for adversarial tests, never the live
+development database or persistent-volume resets.
