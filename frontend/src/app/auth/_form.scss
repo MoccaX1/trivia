@@ -5,7 +5,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-8);
-  align-items: center;
+  align-items: start;
 }
 .introduction {
   max-width: 38rem;
@@ -57,34 +57,49 @@ form {
 }
 .field {
   display: grid;
-  gap: var(--space-2);
+  padding: 0;
+  min-inline-size: 0;
+  gap: var(--space-1);
 }
 label {
-  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-weight: 400;
   font-size: var(--text-small);
 }
 input {
   min-width: 0;
   width: 100%;
   min-height: 2.75rem;
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   color: var(--color-text);
-  background: var(--color-surface);
-  border: 1px solid var(--color-control-border);
+  background: transparent;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-small);
+}
+input:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-width);
 }
 input[aria-invalid='true'] {
   border-color: var(--color-error);
 }
+input::placeholder {
+  color: var(--color-placeholder);
+  opacity: 1;
+}
 // Reserve ordinary validation/status lines without clipping longer messages.
-.field-feedback {
+.field-message {
+  line-height: 1.4;
   min-block-size: 1lh;
   font-size: var(--text-small);
 }
-.field-error,
-.feedback-error {
-  color: var(--color-error);
+.field-error {
+  color: var(--color-validation);
+  font-size: var(--text-caption);
+}
+.field-feedback .feedback-error {
+  color: var(--color-text-secondary);
 }
 .field-error {
   margin: 0;
@@ -149,6 +164,13 @@ button:disabled {
   }
 }
 
+// Narrow rows need room for ordinary format guidance as well as required errors.
+@container (inline-size < 16em) {
+  .field-message {
+    min-block-size: 2lh;
+  }
+}
+
 // Enlarged text can wrap the pending label; reserve two lines only when needed.
 @container (inline-size < 14em) {
   button[type='submit'] {
@@ -162,14 +184,14 @@ button:disabled {
   margin: 0;
   min-inline-size: 0;
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-2);
 }
 .form-link {
   color: var(--color-accent);
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
-  margin-top: var(--space-3);
+  margin-top: 0;
 }
 .continue {
   display: inline-flex;

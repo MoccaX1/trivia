@@ -27,13 +27,14 @@
               id="register-username"
               type="text"
               autocomplete="username"
+              placeholder="Choose a username"
               [formField]="fields.username"
               [attr.aria-invalid]="!!errors().username"
               [attr.aria-describedby]="errors().username ? 'register-username-error' : null"
               autocapitalize="none"
               spellcheck="false"
             />
-            <div class="field-feedback">
+            <div class="field-message">
               @if (errors().username; as message) {
                 <p class="field-error" id="register-username-error">{{ message }}</p>
               }
@@ -45,11 +46,12 @@
               id="register-displayName"
               type="text"
               autocomplete="nickname"
+              placeholder="How others will see you"
               [formField]="fields.displayName"
               [attr.aria-invalid]="!!errors().displayName"
               [attr.aria-describedby]="errors().displayName ? 'register-displayName-error' : null"
             />
-            <div class="field-feedback">
+            <div class="field-message">
               @if (errors().displayName; as message) {
                 <p class="field-error" id="register-displayName-error">{{ message }}</p>
               }
@@ -61,11 +63,12 @@
               id="register-password"
               type="password"
               autocomplete="new-password"
+              placeholder="At least 15 characters"
               [formField]="fields.password"
               [attr.aria-invalid]="!!errors().password"
               [attr.aria-describedby]="errors().password ? 'register-password-error' : null"
             />
-            <div class="field-feedback">
+            <div class="field-message">
               @if (errors().password; as message) {
                 <p class="field-error" id="register-password-error">{{ message }}</p>
               }
@@ -77,13 +80,14 @@
               id="register-confirmPassword"
               type="password"
               autocomplete="new-password"
+              placeholder="Enter password again"
               [formField]="fields.confirmPassword"
               [attr.aria-invalid]="!!errors().confirmPassword"
               [attr.aria-describedby]="
                 errors().confirmPassword ? 'register-confirmPassword-error' : null
               "
             />
-            <div class="field-feedback">
+            <div class="field-message">
               @if (errors().confirmPassword; as message) {
                 <p class="field-error" id="register-confirmPassword-error">{{ message }}</p>
               }
@@ -93,7 +97,7 @@
         <button type="submit" [disabled]="submitDisabled()" [attr.aria-busy]="isSubmitting()">
           {{ isSubmitting() ? 'Creating…' : 'Register' }}
         </button>
-        <div class="feedback" role="status" aria-atomic="true">
+        <div class="feedback field-feedback" role="status" aria-atomic="true">
           @if (feedback(); as message) {
             <p [class.feedback-error]="!isSubmitting()">{{ message }}</p>
           }

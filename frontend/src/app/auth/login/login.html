@@ -12,44 +12,48 @@
         Sign in with your Trivia account. New here? Create an account below.
       </p>
       <form (submit)="signIn($event)" novalidate aria-describedby="account-help">
-        <div class="field">
-          <label for="username">Username</label>
-          <input
-            id="username"
-            type="text"
-            autocomplete="username"
-            autocapitalize="none"
-            spellcheck="false"
-            [formField]="fields.username"
-            [attr.aria-describedby]="usernameError() ? 'username-error' : null"
-            [attr.aria-invalid]="!!usernameError()"
-          />
-          <div class="field-feedback">
-            @if (usernameError(); as message) {
-              <p id="username-error" class="field-error">{{ message }}</p>
-            }
+        <fieldset class="details" aria-label="Sign in details">
+          <div class="field">
+            <label for="username">Username</label>
+            <input
+              id="username"
+              type="text"
+              autocomplete="username"
+              placeholder="Enter your username"
+              autocapitalize="none"
+              spellcheck="false"
+              [formField]="fields.username"
+              [attr.aria-describedby]="usernameError() ? 'username-error' : null"
+              [attr.aria-invalid]="!!usernameError()"
+            />
+            <div class="field-message">
+              @if (usernameError(); as message) {
+                <p id="username-error" class="field-error">{{ message }}</p>
+              }
+            </div>
           </div>
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            autocomplete="current-password"
-            [formField]="fields.password"
-            [attr.aria-describedby]="passwordError() ? 'password-error' : null"
-            [attr.aria-invalid]="!!passwordError()"
-          />
-          <div class="field-feedback">
-            @if (passwordError(); as message) {
-              <p id="password-error" class="field-error">{{ message }}</p>
-            }
+          <div class="field">
+            <label for="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Enter your password"
+              [formField]="fields.password"
+              [attr.aria-describedby]="passwordError() ? 'password-error' : null"
+              [attr.aria-invalid]="!!passwordError()"
+            />
+            <div class="field-message">
+              @if (passwordError(); as message) {
+                <p id="password-error" class="field-error">{{ message }}</p>
+              }
+            </div>
           </div>
-        </div>
+        </fieldset>
         <button type="submit" [disabled]="submitDisabled()" [attr.aria-busy]="isSigningIn()">
           {{ isSigningIn() ? 'Signing in…' : 'Sign in' }}
         </button>
-        <div class="feedback" role="status" aria-atomic="true">
+        <div class="feedback field-feedback" role="status" aria-atomic="true">
           @if (feedback(); as message) {
             <p [class.feedback-error]="!isSigningIn()">{{ message }}</p>
           }

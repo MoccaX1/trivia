@@ -68,12 +68,20 @@ async function verifyLayout(width) {
       });
     };
     await record('idle');
+    await field(target, 'Username').focus();
+    await record('focused');
     await button.click();
     await expect(target.locator('#register-username-error')).toContainText('Enter your username');
     await record('required');
     const mock = { username: 'layout_probe', password: 'Layout only — never a real account' };
     await fill(target, mock);
     await record('corrected');
+    await field(target, 'Username').fill('invalid username');
+    await button.click();
+    await expect(target.locator('#register-username-error')).toContainText('no spaces');
+    await record('format-error');
+    await field(target, 'Username').fill(mock.username);
+    await record('recovered');
     let release;
     await target.route('**/auth/register', async (route) => {
       await new Promise((resolve) => {
@@ -135,7 +143,9 @@ async function verifyLayout(width) {
 try {
   await mkdir('test-results', { recursive: true });
   await verifyLayout(1280);
+  await verifyLayout(768);
   await verifyLayout(375);
+  await verifyLayout(320);
   await page.goto(origin + '/login');
   await page.getByRole('link', { name: 'Create an account', exact: true }).click();
   await expect(page).toHaveURL(origin + '/register');

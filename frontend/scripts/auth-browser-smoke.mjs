@@ -80,6 +80,8 @@ async function verifyLoginLayout(width) {
       });
     };
     await record('idle');
+    await target.getByLabel('Username', { exact: true }).focus();
+    await record('focused');
     let release;
     await target.route('**/auth/login', async (route) => {
       await new Promise((resolve) => {
@@ -109,6 +111,12 @@ async function verifyLoginLayout(width) {
     await target.getByLabel('Username', { exact: true }).fill('layout_probe');
     await target.getByLabel('Password', { exact: true }).fill('not-a-real-account');
     await record('corrected');
+    await target.getByLabel('Username', { exact: true }).fill('invalid username');
+    await button.click();
+    await expect(target.locator('#username-error')).toContainText('no spaces');
+    await record('format-error');
+    await target.getByLabel('Username', { exact: true }).fill('layout_probe');
+    await record('recovered');
     // Text enlargement must reflow; unusually long errors are allowed to grow.
     await target.setViewportSize({ width: 320, height: 740 });
     await target.evaluate(() => {
@@ -156,7 +164,9 @@ async function verifyLoginLayout(width) {
 try {
   await mkdir('test-results', { recursive: true });
   await verifyLoginLayout(1280);
+  await verifyLoginLayout(768);
   await verifyLoginLayout(375);
+  await verifyLoginLayout(320);
   await page.goto(origin);
   await expect(page).toHaveURL(/\/login/);
   await expect(signIn).toBeVisible();
