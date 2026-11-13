@@ -41,3 +41,48 @@ button:disabled {
   opacity: 0.65;
   cursor: default;
 }
+.match-entry {
+  margin-block: var(--space-5) var(--space-6);
+}
+h2 {
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+form {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 28rem;
+  margin-top: var(--space-6);
+}
+label {
+  font-size: var(--text-small);
+  color: var(--color-text-secondary);
+}
+input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-small);
+}
+.field-message {
+  min-block-size: 1.5rem;
+  color: var(--color-validation);
+  font-size: var(--text-caption);
+}
+.field-message p {
+  margin: 0;
+}
+.status {
+  min-block-size: 2lh;
+  color: var(--color-text-secondary);
+}
+.primary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+}

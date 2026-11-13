@@ -44,7 +44,8 @@ describe('session-aware navigation and shell', () => {
     await navigation;
     expect(TestBed.inject(Router).url).toBe('/play');
     expect(harness.routeNativeElement?.textContent).toContain('Welcome, Alice');
-    expect(harness.routeNativeElement?.querySelector('form')).toBeNull();
+    expect(harness.routeNativeElement?.querySelector('#password')).toBeNull();
+    expect(harness.routeNativeElement?.querySelector('#match-id')).not.toBeNull();
   });
   it('shows retryable verification failure without a redirect loop or private content', async () => {
     const harness = await RouterTestingHarness.create();
@@ -57,7 +58,8 @@ describe('session-aware navigation and shell', () => {
     await navigation;
     expect(TestBed.inject(Router).url).toMatch(/^\/login/);
     expect(harness.routeNativeElement?.textContent).toContain('Check session again');
-    expect(harness.routeNativeElement?.querySelector('form')).toBeNull();
+    expect(harness.routeNativeElement?.querySelector('#password')).toBeNull();
+    expect(harness.routeNativeElement?.querySelector('#match-id')).toBeNull();
   });
   it('ignores external return targets and navigates only to the implemented play route', async () => {
     const session = TestBed.inject(Session);

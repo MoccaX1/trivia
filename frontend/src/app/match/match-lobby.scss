@@ -1,0 +1,81 @@
+:host {
+  display: block;
+  max-width: 46rem;
+}
+h1 {
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  line-height: 1.15;
+  font-weight: 600;
+  margin: 0 0 var(--space-5);
+}
+h2 {
+  font-size: 1.5rem;
+  font-weight: 500;
+  margin-block: var(--space-5) var(--space-3);
+}
+.eyebrow,
+a {
+  color: var(--color-accent);
+}
+.identifier {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.supporting {
+  color: var(--color-text-secondary);
+  font-size: var(--text-small);
+}
+.feedback {
+  min-block-size: 2lh;
+  color: var(--color-text-secondary);
+}
+ul {
+  list-style: none;
+  padding: 0;
+  margin-block: var(--space-4) var(--space-5);
+  border-block: 1px solid var(--color-border);
+}
+li {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+  overflow-wrap: anywhere;
+}
+li + li {
+  border-top: 1px solid var(--color-border);
+}
+button,
+a {
+  min-height: 2.75rem;
+}
+button {
+  font: inherit;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-small);
+  color: var(--color-text);
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.primary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+}
+nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+nav a {
+  display: inline-flex;
+  align-items: center;
+}

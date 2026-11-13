@@ -1,9 +1,41 @@
-# Trivia frontend — Stage 2.5
+# Trivia frontend — Stage 3
 
-Angular 22 SPA with self-registration, login, server-session verification, protected
-`/play`, and logout, using the accepted Stage 1 Docker/HTTPS foundation. Match entry, lobby,
-gameplay, and History screens are not implemented. Follow [design guidelines](../docs/frontend-design-guidelines.md)
+Angular 22 SPA with self-registration, login, session verification, Match entry,
+a realtime WAITING Lobby and Host Start handoff. Gameplay and History UI remain
+unimplemented. The accepted Docker/HTTPS foundation is unchanged. Follow [design guidelines](../docs/frontend-design-guidelines.md)
 and the [API contract](../docs/api-contract.md).
+
+## Match entry and WAITING Lobby
+
+At `/play`, Create Match or enter the exact UUID shared by the Host and explicitly
+Join. Only accepted command receipts navigate into `/play/match/:matchId`; the
+participant list and Host role come from server publications. Copy Match ID shares
+an identifier, never a session secret. Direct links and refresh do not establish
+membership or restore a subscription. Return to entry for an explicit Join;
+already-present membership cannot restore delivery through a fresh Join.
+
+The Host can Start with at least two current participants. The server leaving
+WAITING shows a Stage 3 handoff only: no question, answer, timer, score or History UI.
+Snapshots share one increasing version tracker; receipts never advance it. A
+five-second client timeout or interrupted operation is uncertain, not rejected.
+An explicit retry preserves command ID/event/payload; no automatic mutation retry,
+transport reconnection or subscription restoration is performed. A late accepted
+entry receipt can be opened explicitly from Match entry. Missing publication has
+no guaranteed recovery/query endpoint. Disconnect marks cached state stale and
+disables actions; membership is not removed. Internal navigation warns before
+leaving a Match view; refresh/close warnings remain browser-limited. Neither sends
+LeaveMatch nor cancels the Match. Logout/account loss clears the local socket/view.
+
+`npm test` includes Match command/version/concurrency tests and route/lobby tests.
+For the real two-player Chromium probe, use the documented browser Docker image,
+mounts and shared frontend network, mount a writable private `/smoke` directory,
+and run `sh scripts/browser-smoke.sh scripts/lobby-browser-smoke.mjs`. The probe
+creates two disposable accounts through Register, verifies Create/Join/Start and
+stale/reload/logout UX, saves screenshots to ignored `test-results/`, and records
+exact fixture IDs in `/smoke/lobby-fixtures.json` plus temporary credentials for
+subsequent auth/security probes. Remove only those fixture rows after the started
+Match has finished and persistence settled, respecting History foreign keys; revoke
+fixture sessions first. Never delete unrelated accounts, Matches or volumes.
 
 ## Authentication and protected navigation
 
@@ -23,7 +55,7 @@ credentials are placed in browser storage or URLs.
   `{ username, password }` to `POST /auth/login`; duplicates are blocked while pending.
   A rejected form retains the inputs. There are no automatic login retries.
 - `/play` requires a verified authenticated state and shows only the Player's display
-  name, active-session message, sign-out control, and a noninteractive Stage 3 note.
+  name, active-session message, sign-out control, and Create/Join Match actions.
   Authenticated `/login` visits redirect here. All implemented protected destinations
   currently resolve to `/play`; arbitrary `returnTo` URLs are never followed.
   Unknown/future feature paths show a not-found page, not feature placeholders.
@@ -214,8 +246,9 @@ dc logs frontend backend
 dc stop
 ```
 
-`typecheck` uses Angular compiler strict/template checks. `test` runs 74 focused
-Angular tests (22 session/HTTP/concurrency, 8 routing/shell, 14 Login form, 30 Register) with
+`typecheck` uses Angular compiler strict/template checks. `test` runs 99 focused
+Angular tests (22 session/HTTP/concurrency, 8 routing/shell, 14 Login form, 30 Register,
+20 Match Session and 5 Lobby route/presentation) with
 CLI-default Vitest, plus three Node proxy-boundary regressions. It does not establish
 future feature correctness. Build also compiles strict templates.
 ESLint covers TypeScript, Angular HTML accessibility, and tooling JavaScript.
