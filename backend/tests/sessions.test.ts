@@ -3,6 +3,54 @@ import test from 'node:test';
 import { MemorySessionStore, idleMs, absoluteMs } from '../src/application/sessions.js';
 import { fixturePlayer } from './support/auth.js';
 
+for (const boundary of ['idle', 'absolute', 'coincident'] as const) {
+  for (const offset of [-1, 0, 1]) {
+    for (const timerFirst of [false, true]) {
+      test(`${boundary} boundary at ${offset} ms, timer first: ${timerFirst}`, async () => {
+        const { store, set, fire, tasks } = setup();
+        const token = await store.create(fixturePlayer);
+        let invalidations = 0;
+        const unwatch = await store.watch(token, () => {
+          invalidations++;
+          unwatch?.();
+        });
+        const deadline = boundary === 'idle' ? idleMs : absoluteMs;
+        if (boundary !== 'idle') {
+          for (let time = idleMs - 1; time < absoluteMs - idleMs; time += idleMs - 1) {
+            set(time);
+            assert.ok(await store.act(token, () => true));
+          }
+          set(absoluteMs - idleMs);
+          assert.ok(await store.act(token, () => true)); // Deadlines coincide.
+          if (boundary === 'absolute') {
+            set(absoluteMs - 2);
+            assert.ok(await store.act(token, () => true)); // Absolute still wins.
+          }
+          assert.deepEqual(
+            [...tasks].map((task) => task.at),
+            [absoluteMs],
+          );
+        }
+        const [originalTimer] = tasks;
+        set(deadline + offset);
+        if (timerFirst) fire();
+        // Admission and profile both check the monotonic deadline even if the timer is late.
+        assert.equal(!!(await store.act(token, () => true)), offset < 0);
+        assert.equal(!!(await store.resolve(token)), offset < 0);
+        if (offset < 0) set(boundary === 'idle' ? idleMs * 2 - 1 : absoluteMs);
+        fire();
+        originalTimer.callback();
+        await store.revoke(token);
+        assert.equal(await store.resolve(token), null);
+        assert.equal(await store.watch(token, () => assert.fail('Expired session watched')), null);
+        assert.equal(invalidations, 1);
+        assert.equal(tasks.size, 0);
+        await store.close();
+      });
+    }
+  }
+}
+
 function setup() {
   let time = 0;
   const tasks = new Set<{ at: number; callback: (error?: unknown) => void }>();
@@ -108,5 +156,35 @@ test('inspect authorizes and invokes delivery without yielding or refreshing idl
   assert.deepEqual(await inspection, { value: 'delivered' });
   set(idleMs);
   assert.equal(await store.inspect(token, () => assert.fail()), null);
+  await store.close();
+});
+
+test('work admitted one millisecond before absolute expiry may settle after socket cleanup', async () => {
+  const { store, set, fire, tasks } = setup();
+  const token = await store.create(fixturePlayer);
+  let closes = 0;
+  await store.watch(token, () => closes++);
+  for (let time = idleMs - 1; time < absoluteMs - 1; time += idleMs - 1) {
+    set(time);
+    assert.ok(await store.act(token, () => true));
+  }
+  let complete!: (receipt: string) => void;
+  set(absoluteMs - 1);
+  const admitted = await store.act(token, () => {
+    return new Promise<string>((resolve) => {
+      complete = resolve;
+    });
+  });
+  assert.ok(admitted);
+  const [timer] = tasks;
+  set(absoluteMs);
+  assert.equal(await store.resolve(token), null); // Profile wins the race against the timer.
+  fire();
+  timer.callback();
+  assert.equal(await store.act(token, () => assert.fail('Expired command admitted')), null);
+  complete('accepted');
+  assert.equal(await admitted.value, 'accepted');
+  assert.equal(closes, 1);
+  assert.equal(await store.resolve(token), null);
   await store.close();
 });

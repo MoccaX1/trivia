@@ -218,6 +218,19 @@ describe('Match Session authoritative lifecycle', () => {
     expect(match.matchId()).toBeUndefined();
     expect(match.snapshot()).toBeUndefined();
   });
+  it('a late accepted ACK after expiry cannot restore private Match state', async () => {
+    const result = match.command('CreateMatch');
+    socket.receive('disconnect');
+    expect(await result).toBeUndefined();
+    expect(match.uncertain()).toBe(true);
+    auth.generation++;
+    state.set({ status: 'anonymous' });
+    TestBed.tick();
+    socket.accept();
+    expect(match.matchId()).toBeUndefined();
+    expect(match.snapshot()).toBeUndefined();
+    expect(match.connection()).toBe('idle');
+  });
   it('obsolete authentication rejection cannot invalidate a newer viewer', async () => {
     const result = match.command('CreateMatch');
     auth.generation++;

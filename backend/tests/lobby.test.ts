@@ -1209,11 +1209,15 @@ test(
       calls++;
       return original(player, id);
     };
+    const before = await f.connect('bob');
+    f.setTime(idleMs - 1);
+    await accepted(command(before, 'CreateMatch', {}));
+    assert.equal(calls, 1);
     f.setTime(idleMs);
     const gone = new Promise<void>((resolve) => a.socket.once('disconnect', () => resolve()));
     a.socket.emit('CreateMatch', { commandId: randomUUID(), payload: {} });
     await gone;
-    assert.equal(calls, 0);
+    assert.equal(calls, 1);
     const b = await f.connect('bob');
     let admitted: ReturnType<MatchCoordinator['create']> | undefined;
     f.coordinator.create = (player, id) => {
