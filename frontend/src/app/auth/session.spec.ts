@@ -216,4 +216,108 @@ describe('Session HTTP ownership and generations', () => {
     await result;
     http.expectNone('/auth/profile');
   });
+  it('coalesces revalidation and preserves the viewer and socket generation on success', async () => {
+    await signIn();
+    const generation = session.generation;
+    const current = session.state();
+    const first = session.revalidate();
+    expect(session.revalidate()).toBe(first);
+    expect(session.check()).toBe(first);
+    expect(session.state()).toBe(current);
+    expect(session.verification()).toBe('pending');
+    http.expectOne('/auth/profile').flush({ player });
+    await first;
+    expect(session.generation).toBe(generation);
+    expect(session.state()).toBe(current);
+    expect(session.verification()).toBeUndefined();
+  });
+  it('preserves the expired-session message for navigation to Login', async () => {
+    await signIn();
+    const result = session.revalidate();
+    http
+      .expectOne('/auth/profile')
+      .flush({ code: 'UNAUTHENTICATED' }, { status: 401, statusText: 'Unauthorized' });
+    expect((await result).status).toBe('anonymous');
+    expect(session.issue()?.message).toContain('Your session has ended');
+  });
+  it('keeps transport errors distinct and respects Retry-After before rechecking', async () => {
+    vi.useFakeTimers();
+    await signIn();
+    const result = session.revalidate();
+    http
+      .expectOne('/auth/profile')
+      .flush({}, { status: 503, statusText: 'Unavailable', headers: { 'Retry-After': '1' } });
+    await result;
+    expect(session.verification()).toBe('unavailable');
+    expect(session.player()).toEqual(player);
+    await session.revalidate();
+    http.expectNone('/auth/profile');
+    await vi.advanceTimersByTimeAsync(1000);
+    const retry = session.revalidate();
+    http.expectOne('/auth/profile').flush({ player });
+    await retry;
+    expect(session.verification()).toBeUndefined();
+  });
+  it('clears protected identity when the profile belongs to another viewer', async () => {
+    await signIn();
+    const result = session.revalidate();
+    http.expectOne('/auth/profile').flush({ player: { ...player, id: 'other' } });
+    expect((await result).status).toBe('unavailable');
+    expect(session.player()).toBeUndefined();
+  });
+  it('lets logout supersede a pending verification and shares its outcome', async () => {
+    await signIn();
+    const result = session.revalidate();
+    const profile = http.expectOne('/auth/profile');
+    const logout = session.logout();
+    const duringLogout = session.revalidate();
+    http.expectOne('/auth/logout').flush(null, { status: 204, statusText: 'No Content' });
+    await logout;
+    profile.flush({ player });
+    expect((await result).status).toBe('anonymous');
+    expect((await duringLogout).status).toBe('anonymous');
+    expect(session.verification()).toBeUndefined();
+  });
+  it('ignores an obsolete verification 401 after a newer login', async () => {
+    await signIn();
+    const result = session.revalidate();
+    const profile = http.expectOne('/auth/profile');
+    const login = session.login(credentials);
+    http.expectOne('/auth/login').flush({ player: { ...player, id: 'new' } });
+    await login;
+    profile.flush({ code: 'UNAUTHENTICATED' }, { status: 401, statusText: 'Unauthorized' });
+    await result;
+    expect(session.player()?.id).toBe('new');
+    expect(session.issue()).toBeUndefined();
+  });
+  it('only checks on hidden-to-visible transitions and removes the listener on destruction', async () => {
+    await signIn();
+    let hidden = false;
+    const visibility = vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
+    let cleanup = () => {};
+    session.watchForeground({
+      destroyed: false,
+      onDestroy: (fn) => {
+        cleanup = fn;
+        return () => {};
+      },
+    });
+    const change = () => document.dispatchEvent(new Event('visibilitychange'));
+    change();
+    http.expectNone('/auth/profile');
+    hidden = true;
+    change();
+    hidden = false;
+    change();
+    const pending = session.revalidate();
+    http.expectOne('/auth/profile').flush({ player });
+    await pending;
+    cleanup();
+    hidden = true;
+    change();
+    hidden = false;
+    change();
+    http.expectNone('/auth/profile');
+    visibility.mockRestore();
+  });
 });

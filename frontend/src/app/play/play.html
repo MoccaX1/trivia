@@ -10,7 +10,7 @@
         class="primary"
         type="button"
         (click)="create()"
-        [disabled]="!match.live() || match.busy() || match.uncertain()"
+        [disabled]="!match.canSend() || match.busy() || match.uncertain()"
       >
         Create Match
       </button>
@@ -33,19 +33,30 @@
             <p id="match-id-error">{{ fields.matchId().errors()[0]?.message }}</p>
           }
         </div>
-        <button type="submit" [disabled]="!match.live() || match.busy() || match.uncertain()">
+        <button type="submit" [disabled]="!match.canSend() || match.busy() || match.uncertain()">
           Join Match
         </button>
       </form>
       @if (match.intent()?.status === 'accepted' && match.matchId()) {
         <a [routerLink]="['/play/match', match.matchId()]">Open acknowledged Match</a>
       }
-      <p class="status" role="status">{{ match.feedback() || 'Connecting securely…' }}</p>
-      @if (match.uncertain() && match.live()) {
+      <p class="status" role="status">{{ match.statusMessage() || 'Connecting securely…' }}</p>
+      @if (match.uncertain() && match.canSend()) {
         <button type="button" (click)="retry()">Retry original command</button>
       }
+      @if (session.verification() === 'unavailable' && match.live()) {
+        <button type="button" (click)="session.revalidate()" [disabled]="session.retryBlocked()">
+          Check session again
+        </button>
+      }
       @if (match.connection() === 'lost') {
-        <button type="button" (click)="reconnect()">Open a new connection</button>
+        <button
+          type="button"
+          (click)="reconnect()"
+          [disabled]="session.verification() === 'pending' || session.retryBlocked()"
+        >
+          Open a new connection
+        </button>
         <p class="next">
           A new connection cannot restore previous Match subscriptions or membership.
         </p>

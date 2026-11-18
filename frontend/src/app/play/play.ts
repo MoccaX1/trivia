@@ -46,10 +46,10 @@ export class Play {
     if (!this.destroy.destroyed && id) await this.router.navigate(['/play/match', id]);
   }
   protected reconnect(): void {
-    this.match.clear();
-    this.match.connect();
+    void this.match.reconnect(this.destroy);
   }
   constructor() {
+    this.session.watchForeground(this.destroy);
     this.match.connect();
     this.destroy.onDestroy(() => {
       const destination = this.router.currentNavigation()?.finalUrl?.toString();

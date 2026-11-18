@@ -59,10 +59,15 @@
         delivery.
       </p>
     }
-    <p class="feedback" role="status">{{ match.feedback() }}</p>
-    @if (match.uncertain() && match.live()) {
+    <p class="feedback" role="status">{{ match.statusMessage() }}</p>
+    @if (match.uncertain() && match.canSend()) {
       <button type="button" (click)="match.retry()" [disabled]="match.busy()">
         Retry original command
+      </button>
+    }
+    @if (session.verification() === 'unavailable') {
+      <button type="button" (click)="session.revalidate()" [disabled]="session.retryBlocked()">
+        Check session again
       </button>
     }
     <nav aria-label="Lobby navigation">

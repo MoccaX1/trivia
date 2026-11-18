@@ -1,3 +1,4 @@
+import { DOCUMENT } from '@angular/common';
 import {
   computed,
   DestroyRef,
@@ -55,6 +56,7 @@ const unknownOutcome =
 @Injectable({ providedIn: 'root' })
 export class MatchSession {
   private readonly auth = inject(Session);
+  private readonly document = inject(DOCUMENT);
   private readonly createSocket = inject(MATCH_SOCKET);
   private socket?: Socket;
   private epoch = 0;
@@ -67,6 +69,19 @@ export class MatchSession {
   readonly intent = signal<Intent | undefined>(undefined);
   readonly feedback = signal('');
   readonly live = computed(() => this.connection() === 'connected');
+  readonly canSend = computed(
+    () => this.live() && !!this.auth.player() && !this.auth.verification(),
+  );
+  readonly statusMessage = computed(() => {
+    switch (this.auth.verification()) {
+      case 'pending':
+        return 'Checking your session…';
+      case 'unavailable':
+        return 'We couldn’t verify your session. Check your connection and try again.';
+      default:
+        return this.feedback();
+    }
+  });
   readonly busy = computed(() => this.intent()?.status === 'pending');
   readonly uncertain = computed(() => this.intent()?.status === 'uncertain');
   readonly isHost = computed(
@@ -76,7 +91,7 @@ export class MatchSession {
   );
   readonly canStart = computed(
     () =>
-      this.live() &&
+      this.canSend() &&
       !(this.intent()?.event === 'StartMatch' && this.intent()?.status === 'accepted') &&
       this.isHost() &&
       !this.busy() &&
@@ -117,10 +132,11 @@ export class MatchSession {
     socket.on('connect_error', (error: Error) => {
       if (!current()) return;
       this.connection.set('lost');
-      this.feedback.set('Connection unavailable. Check your session and HTTPS connection.');
+      this.feedback.set('Connection unavailable. Try opening a new connection.');
       if (error.message === 'UNAUTHENTICATED') this.auth.unauthenticated(generation);
+      else this.verifyVisible();
     });
-    socket.on('disconnect', (reason: string) => {
+    socket.on('disconnect', () => {
       if (!current()) return;
       this.connection.set('lost');
       this.finish?.();
@@ -130,7 +146,7 @@ export class MatchSession {
       this.feedback.set(
         'Connection lost. The view is stale; disconnect does not remove membership. Match subscriptions cannot be restored automatically.',
       );
-      if (reason === 'io server disconnect') void this.auth.check();
+      this.verifyVisible();
     });
     for (const event of ['LobbySnapshot', 'MatchSnapshot'])
       socket.on(event, (value: unknown) => {
@@ -142,6 +158,33 @@ export class MatchSession {
       });
     socket.connect();
   }
+  private verifyVisible(): void {
+    if (!this.document.hidden) void this.auth.revalidate();
+  }
+
+  async reconnect(owner: DestroyRef): Promise<void> {
+    if (this.connection() !== 'lost' || !this.auth.player()) return;
+    const epoch = this.epoch;
+    const generation = this.auth.generation;
+    const state = await this.auth.revalidate();
+    if (
+      owner.destroyed ||
+      epoch !== this.epoch ||
+      generation !== this.auth.generation ||
+      this.connection() !== 'lost' ||
+      state.status !== 'authenticated' ||
+      this.auth.verification()
+    )
+      return;
+    this.socket?.removeAllListeners();
+    this.socket?.disconnect();
+    this.socket = undefined;
+    this.buffered = undefined;
+    this.snapshot.set(undefined);
+    this.matchId.set(undefined);
+    this.connect();
+  }
+
   clear(): void {
     this.finish?.();
     this.finish = undefined;
@@ -159,7 +202,7 @@ export class MatchSession {
     this.buffered = undefined;
   }
   async command(event: MatchCommand, matchId?: string): Promise<string | undefined> {
-    if (!this.live() || this.busy() || this.uncertain()) return;
+    if (!this.canSend() || this.busy() || this.uncertain()) return;
     if (event !== 'CreateMatch' && (!matchId || !matchIdPattern.test(matchId))) {
       this.feedback.set('Enter the complete Match UUID exactly as shared by the Host.');
       return;
@@ -178,7 +221,7 @@ export class MatchSession {
   }
   retry(): Promise<string | undefined> {
     const intent = this.intent();
-    return intent?.status === 'uncertain' && this.live()
+    return intent?.status === 'uncertain' && this.canSend()
       ? this.send(intent)
       : Promise.resolve(undefined);
   }

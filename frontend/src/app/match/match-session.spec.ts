@@ -71,13 +71,21 @@ describe('Match Session authoritative lifecycle', () => {
     player: typeof player;
     generation: number;
     unauthenticated: ReturnType<typeof vi.fn>;
-    check: ReturnType<typeof vi.fn>;
+    revalidate: ReturnType<typeof vi.fn>;
+    verification: ReturnType<typeof signal<'pending' | 'unavailable' | undefined>>;
   };
   beforeEach(() => {
     socket = new FakeSocket();
     player.set({ id: 'a', displayName: 'Alice' });
     state.set({ status: 'authenticated' });
-    auth = { state, player, generation: 1, unauthenticated: vi.fn(), check: vi.fn() };
+    auth = {
+      state,
+      player,
+      generation: 1,
+      unauthenticated: vi.fn(),
+      revalidate: vi.fn(),
+      verification: signal(undefined),
+    };
     TestBed.configureTestingModule({
       providers: [
         { provide: Session, useValue: auth },
@@ -288,4 +296,68 @@ describe('Match Session authoritative lifecycle', () => {
     await result;
     expect(auth.unauthenticated).toHaveBeenCalledWith(1);
   });
+  it('keeps the healthy lobby and blocks commands while verification is pending or inconclusive', async () => {
+    const join = match.command('JoinMatch', id);
+    socket.accept();
+    await join;
+    socket.receive('LobbySnapshot', lobby(4));
+    const view = match.snapshot();
+    auth.verification.set('pending');
+    expect(match.live()).toBe(true);
+    await match.command('StartMatch', id);
+    auth.verification.set('unavailable');
+    expect(match.canStart()).toBe(false);
+    expect(socket.emitted).toHaveLength(1);
+    expect(match.snapshot()).toBe(view);
+    auth.verification.set(undefined);
+    expect(match.canStart()).toBe(true);
+  });
+
+  it('reconciles a visible generic handshake failure without treating it as a 401', () => {
+    const visibility = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    try {
+      socket.receive('connect_error', new Error('xhr poll error'));
+      expect(auth.revalidate).toHaveBeenCalledOnce();
+      expect(auth.unauthenticated).not.toHaveBeenCalled();
+      expect(match.statusMessage()).toContain('opening a new connection');
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it('replaces a lost transport only after verification and preserves an unresolved command ID', async () => {
+    const command = match.command('CreateMatch');
+    socket.receive('disconnect');
+    await command;
+    const owner = { destroyed: false, onDestroy: vi.fn() };
+    auth.revalidate.mockResolvedValue({ status: 'authenticated', player: player() });
+    await Promise.all([match.reconnect(owner), match.reconnect(owner)]);
+    expect(match.live()).toBe(true);
+    expect(socket.emitted).toHaveLength(1);
+    const retry = match.retry();
+    expect(socket.emitted[1].request).toEqual(socket.emitted[0].request);
+    socket.accept(1);
+    await retry;
+  });
+
+  it.each(['navigation', 'logout', 'unavailable'])(
+    'does not reopen a socket after %s supersedes recovery',
+    async (reason) => {
+      socket.receive('disconnect');
+      const owner = { destroyed: false, onDestroy: vi.fn() };
+      let resolve!: (state: { status: 'authenticated' }) => void;
+      auth.revalidate.mockReturnValue(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      const retry = match.reconnect(owner);
+      if (reason === 'navigation') owner.destroyed = true;
+      else if (reason === 'logout') auth.generation++;
+      else auth.verification.set('unavailable');
+      resolve({ status: 'authenticated' });
+      await retry;
+      expect(match.connection()).toBe('lost');
+    },
+  );
 });

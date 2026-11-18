@@ -22,6 +22,7 @@ export class MatchLobby {
   );
   protected readonly copied = signal('');
   constructor() {
+    this.session.watchForeground(this.destroy);
     this.route.paramMap
       .pipe(takeUntilDestroyed())
       .subscribe((params) => this.id.set(params.get('matchId') ?? ''));

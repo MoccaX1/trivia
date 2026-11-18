@@ -1,3 +1,4 @@
+import { DOCUMENT } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
@@ -77,6 +78,9 @@ export class Session {
   readonly logoutUnconfirmed = this.logoutUnknown.asReadonly();
   private readonly cooldown = signal(false);
   readonly retryBlocked = this.cooldown.asReadonly();
+  private readonly document = inject(DOCUMENT);
+  private readonly verificationState = signal<'pending' | 'unavailable' | undefined>(undefined);
+  readonly verification = this.verificationState.asReadonly();
   private epoch = 0;
   private profile?: { epoch: number; promise: Promise<SessionState> };
   private mutation?: Promise<boolean>;
@@ -94,6 +98,7 @@ export class Session {
   unauthenticated(generation: number): void {
     if (generation !== this.epoch) return;
     this.epoch++;
+    this.verificationState.set(undefined);
     this.current.set({ status: 'anonymous' });
     this.operation.set(undefined);
     this.currentIssue.set({ message: 'Your session has ended. Sign in again.', retryAt: 0 });
@@ -105,11 +110,33 @@ export class Session {
   }
 
   check(): Promise<SessionState> {
+    return this.verify(false);
+  }
+
+  revalidate(): Promise<SessionState> {
+    return this.verify(true);
+  }
+
+  watchForeground(owner: DestroyRef): void {
+    let wasHidden = this.document.hidden;
+    const onVisibility = () => {
+      const resumed = wasHidden && !this.document.hidden;
+      wasHidden = this.document.hidden;
+      if (resumed && this.player()) void this.revalidate();
+    };
+    this.document.addEventListener('visibilitychange', onVisibility);
+    owner.onDestroy(() => this.document.removeEventListener('visibilitychange', onVisibility));
+  }
+
+  private verify(background: boolean): Promise<SessionState> {
     if (this.mutation) return this.mutation.then(() => this.state());
     if (this.profile?.epoch === this.epoch) return this.profile.promise;
     if (this.retryBlocked()) return Promise.resolve(this.state());
-    const epoch = ++this.epoch;
-    this.current.set({ status: 'checking' });
+    const viewer = background ? this.player() : undefined;
+    if (background && !viewer) return Promise.resolve(this.state());
+    const epoch = viewer ? this.epoch : ++this.epoch;
+    if (viewer) this.verificationState.set('pending');
+    else this.current.set({ status: 'checking' });
     const promise = firstValueFrom(
       this.http.get<{ player: Player }>('/auth/profile', {
         withCredentials: true,
@@ -117,7 +144,18 @@ export class Session {
       }),
     )
       .then(({ player }) => {
-        if (epoch === this.epoch) this.current.set({ status: 'authenticated', player });
+        if (epoch !== this.epoch) return this.state();
+        if (viewer && player?.id !== viewer.id) {
+          this.epoch++;
+          this.verificationState.set(undefined);
+          this.current.set({
+            status: 'unavailable',
+            issue: {
+              message: 'The session changed. Check your session again to continue.',
+              retryAt: 0,
+            },
+          });
+        } else if (!viewer) this.current.set({ status: 'authenticated', player });
         return this.state();
       })
       .catch((error: unknown) => {
@@ -129,10 +167,11 @@ export class Session {
           ) {
             const wasLogoutUnconfirmed = this.logoutUnconfirmed();
             this.unauthenticated(epoch);
-            if (!wasLogoutUnconfirmed) this.currentIssue.set(undefined);
+            if (!viewer && !wasLogoutUnconfirmed) this.currentIssue.set(undefined);
           } else {
             const issue = sessionIssue(error);
-            this.current.set({ status: 'unavailable', issue });
+            if (viewer) this.verificationState.set('unavailable');
+            else this.current.set({ status: 'unavailable', issue });
             this.setRetry(issue);
           }
         }
@@ -140,6 +179,8 @@ export class Session {
       })
       .finally(() => {
         if (this.profile?.epoch === epoch) this.profile = undefined;
+        if (epoch === this.epoch && this.verification() === 'pending')
+          this.verificationState.set(undefined);
       });
     this.profile = { epoch, promise };
     return promise;
@@ -160,6 +201,7 @@ export class Session {
     body: Credentials | Record<string, never>,
   ): Promise<boolean> {
     const epoch = ++this.epoch;
+    this.verificationState.set(undefined);
     this.operation.set(action);
     this.currentIssue.set(undefined);
     this.current.set({ status: 'checking' }); // Removes the previous private profile immediately.

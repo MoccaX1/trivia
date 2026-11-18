@@ -22,6 +22,8 @@ describe('Lobby route and presentation', () => {
             player,
             state: signal({ status: 'authenticated' }),
             pending: signal(undefined),
+            verification: signal(undefined),
+            watchForeground: vi.fn(),
             logout: vi.fn(),
           },
         },
