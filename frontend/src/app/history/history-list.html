@@ -1,0 +1,44 @@
+<section aria-labelledby="history-title">
+  <h1 id="history-title">Match History</h1>
+  @let state = history.state();
+  <nav aria-label="History navigation">
+    <a routerLink="/play">Back to Play</a>
+    <button type="button" (click)="history.refresh()" [disabled]="state.loading">Refresh</button>
+  </nav>
+  <p role="status">
+    @if (state.loading) {
+      {{ state.data ? 'Loading more Matches…' : 'Loading History…' }}
+    } @else if (state.data && state.data.items.length === 0) {
+      No completed Matches yet.
+    }
+  </p>
+  @if (state.error !== undefined) {
+    <p role="alert">
+      {{
+        errorMessage(
+          state.error,
+          'This History page could not be read. Refresh to start from the first page.'
+        )
+      }}
+    </p>
+  }
+  @if (state.data; as page) {
+    @if (page.items.length) {
+      <ul class="rows" aria-label="Completed Matches">
+        @for (item of page.items; track item.matchId) {
+          <li>
+            <a [routerLink]="['/play/history', item.matchId]">
+              Match on
+              <time [attr.datetime]="item.finishedAt">{{ item.finishedAt | date: 'medium' }}</time>
+            </a>
+            <span>{{ item.participantCount }} players · Rank {{ item.ownResult.rank }}</span>
+            <span class="score">Score units: {{ item.ownResult.score.scoreUnits }}</span>
+          </li>
+        }
+      </ul>
+    }
+    @if (page.nextCursor !== null && state.error !== 400) {
+      <button type="button" (click)="loadMore()" [disabled]="state.loading">Load More</button>
+    }
+  }
+</section>

@@ -276,7 +276,9 @@ describe('Lobby route and presentation', () => {
       expect(rows[1]).toMatch(/Tied rank 1.*Alice.*You.*Tied winner.*9007199254740993/);
       expect(rows[2]).toMatch(/Rank 3.*Charlie.*Score units: 0/);
       expect(html.textContent).not.toMatch(/saved|committed|persisted/i);
-      expect(html.querySelector('[href*="history"]')).toBeNull();
+      const historyLink = html.querySelector<HTMLAnchorElement>('nav a[href*="history"]');
+      expect(historyLink?.textContent?.trim()).toBe('View Match History');
+      expect(historyLink?.getAttribute('href')).toBe('/play/history/' + id);
       const back = html.querySelector<HTMLAnchorElement>('nav a')!;
       expect(back.textContent?.trim()).toBe('Back to Play');
       expect(back.getAttribute('href')).toBe('/play');

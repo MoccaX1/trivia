@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
+import { verifyOutsiderHistory, verifyParticipantHistory } from './history-acceptance.mjs';
 const origin = 'https://localhost:4200';
 const fullMatch = process.env.SMOKE_FULL_MATCH === '1';
 const countdownOnly = process.env.SMOKE_COUNTDOWN === '1';
+const historyAcceptance = process.env.SMOKE_HISTORY === '1';
 const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
 const fixtures = JSON.parse(
   await readFile('/smoke/lobby-fixtures.json', 'utf8').catch(() =>
@@ -24,6 +26,7 @@ const contexts = await Promise.all(
 const pages = await Promise.all(contexts.map((c) => c.newPage()));
 const errors = [];
 const snapshots = pages.map(() => []);
+const gameplaySockets = pages.map(() => []);
 for (const [index, page] of pages.entries()) {
   page.on('pageerror', (e) => errors.push(e.message));
   const record = (payload) => {
@@ -33,11 +36,12 @@ for (const [index, page] of pages.entries()) {
       if (event === 'MatchSnapshot') snapshots[index].push(snapshot);
     }
   };
-  page.on('websocket', (socket) =>
+  page.on('websocket', (socket) => {
+    if (new URL(socket.url()).pathname === '/socket.io/') gameplaySockets[index].push(socket);
     socket.on('framereceived', ({ payload }) => {
       if (typeof payload === 'string') record(payload);
-    }),
-  );
+    });
+  });
   page.on('response', async (response) => {
     if (
       response.ok() &&
@@ -59,6 +63,23 @@ async function login(page, account) {
   await page.getByLabel('Password', { exact: true }).fill(account.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Create Match', exact: true })).toBeEnabled();
+}
+
+async function registerAndLogin(page, account) {
+  await page.goto(origin + '/register');
+  await page.getByLabel('Username', { exact: true }).fill(account.username);
+  await page.getByLabel('Public display name', { exact: true }).fill(account.displayName);
+  await page.getByLabel('Password', { exact: true }).fill(account.password);
+  await page.getByLabel('Confirm password', { exact: true }).fill(account.password);
+  const registered = page.waitForResponse((r) => r.url().endsWith('/auth/register'));
+  await page.getByRole('button', { name: 'Register', exact: true }).click();
+  const response = await registered;
+  assert.equal(response.status(), 201);
+  const viewer = { ...(await response.json()).player, username: account.username };
+  fixtures.players.push(viewer);
+  await save();
+  await login(page, account);
+  return viewer;
 }
 
 async function verifyStandings(page, participants, viewerId) {
@@ -142,7 +163,7 @@ async function verifyFullMatch(matchId, players) {
             browserNow: Date.now(),
             amount: element.textContent.trim(),
           }));
-          if (!countdownOnly) return reading;
+          if (!countdownOnly && !historyAcceptance) return reading;
           const current = seen.findLast(
             (item) =>
               item.matchId === matchId &&
@@ -172,7 +193,7 @@ async function verifyFullMatch(matchId, players) {
           assert.ok(seconds > 0 && Math.abs(seconds - expected) <= 1, JSON.stringify(reading));
           return seconds;
         };
-        if (countdownOnly) {
+        if (countdownOnly || historyAcceptance) {
           await saveTimers();
           assertTimer(firstReading);
         }
@@ -221,7 +242,7 @@ async function verifyFullMatch(matchId, players) {
           for (const button of await buttons.all())
             await expect(button).toHaveAttribute('aria-disabled', 'true');
         }
-        if (countdownOnly) {
+        if (countdownOnly || (historyAcceptance && number <= 2)) {
           let later;
           await expect
             .poll(
@@ -313,6 +334,23 @@ async function verifyFullMatch(matchId, players) {
         path: `test-results/gameplay-finished-${index}.png`,
         fullPage: true,
       });
+      if (historyAcceptance) {
+        await writeFile(
+          `/smoke/live-viewer-${index}.json`,
+          JSON.stringify({ viewer, questions, reveals, finished, timerSamples }, null, 2),
+        );
+        const history = await verifyParticipantHistory(
+          page,
+          origin,
+          matchId,
+          viewer,
+          finished,
+          reveals,
+          gameplaySockets[index],
+          index,
+        );
+        return { viewer, questions, reveals, finished, timerSamples, history };
+      }
       page.once('dialog', (dialog) => dialog.accept());
       await page.getByRole('link', { name: 'Back to Play' }).click();
       await expect(page).toHaveURL(origin + '/play');
@@ -325,6 +363,23 @@ async function verifyFullMatch(matchId, players) {
     countdownOnly ? '/smoke/countdown-evidence.json' : '/smoke/gameplay-evidence.json',
     JSON.stringify({ matchId, players: evidence }, null, 2),
   );
+  if (historyAcceptance) {
+    const outsider = await browser.newPage();
+    const viewer = await registerAndLogin(outsider, {
+      username: 'outsider_' + randomBytes(8).toString('hex'),
+      displayName: 'History outsider',
+      password: randomBytes(24).toString('base64url'),
+    });
+    const authorization = await verifyOutsiderHistory(outsider, origin, matchId, viewer);
+    await writeFile(
+      '/smoke/history-evidence.json',
+      JSON.stringify({ matchId, players: evidence, authorization }, null, 2),
+    );
+    console.log(
+      `PASS: Match ${matchId}, both viewers completed 10 questions and 10 reveals, FINISHED → History, and outsider authorization verified.`,
+    );
+    return;
+  }
   console.log(
     countdownOnly
       ? `PASS: Match ${matchId}, both viewers observed decreasing countdowns, answers and two server reveals.`
@@ -335,18 +390,7 @@ async function verifyFullMatch(matchId, players) {
 try {
   const firstPlayer = fixtures.players.length;
   for (const [i, page] of pages.entries()) {
-    await page.goto(origin + '/register');
-    await page.getByLabel('Username', { exact: true }).fill(accounts[i].username);
-    await page.getByLabel('Public display name', { exact: true }).fill(accounts[i].displayName);
-    await page.getByLabel('Password', { exact: true }).fill(accounts[i].password);
-    await page.getByLabel('Confirm password', { exact: true }).fill(accounts[i].password);
-    const registered = page.waitForResponse((r) => r.url().endsWith('/auth/register'));
-    await page.getByRole('button', { name: 'Register', exact: true }).click();
-    const response = await registered;
-    assert.equal(response.status(), 201);
-    fixtures.players.push({ ...(await response.json()).player, username: accounts[i].username });
-    await save();
-    await login(page, accounts[i]);
+    await registerAndLogin(page, accounts[i]);
   }
   const [host, guest] = pages;
   await host.getByRole('button', { name: 'Create Match', exact: true }).click();
@@ -398,7 +442,7 @@ try {
   await host.keyboard.press('Tab');
   assert.ok(await host.locator(':focus').count());
   await host.getByRole('button', { name: 'Start Match', exact: true }).click();
-  if (fullMatch || countdownOnly) {
+  if (fullMatch || countdownOnly || historyAcceptance) {
     await verifyFullMatch(id, fixtures.players.slice(firstPlayer));
   } else {
     const latest = (index, number = 1) =>

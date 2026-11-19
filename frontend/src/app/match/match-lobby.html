@@ -197,7 +197,11 @@
     <nav aria-label="Lobby navigation">
       <a routerLink="/play">{{
         current()?.phase === 'FINISHED' ? 'Back to Play' : 'Back to Match entry'
-      }}</a><button type="button" (click)="session.logout()" [disabled]="!!session.pending()">
+      }}</a>
+      @if (current()?.phase === 'FINISHED') {
+        <a [routerLink]="['/play/history', id()]">View Match History</a>
+      }
+      <button type="button" (click)="session.logout()" [disabled]="!!session.pending()">
         Sign out
       </button>
     </nav>

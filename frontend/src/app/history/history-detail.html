@@ -1,0 +1,104 @@
+<section aria-labelledby="result-title">
+  <h1 id="result-title">Match results</h1>
+  @let state = history.state();
+  <nav aria-label="Match results navigation">
+    <a routerLink="/play/history">Back to History</a>
+    <button type="button" (click)="history.refresh()" [disabled]="state.loading">Refresh</button>
+  </nav>
+  @if (state.loading) {
+    <p role="status">Loading Match results…</p>
+  }
+  @if (state.error !== undefined) {
+    <p role="alert">{{ errorMessage(state.error, 'This Match link is invalid.') }}</p>
+  }
+  @if (state.data; as result) {
+    <dl>
+      <div>
+        <dt>Started</dt>
+        <dd>
+          <time [attr.datetime]="result.match.startedAt">{{
+            result.match.startedAt | date: 'medium'
+          }}</time>
+        </dd>
+      </div>
+      <div>
+        <dt>Finished</dt>
+        <dd>
+          <time [attr.datetime]="result.match.finishedAt">{{
+            result.match.finishedAt | date: 'medium'
+          }}</time>
+        </dd>
+      </div>
+      @if (ownStanding(); as own) {
+        <div>
+          <dt>Your final rank</dt>
+          <dd>{{ own.rank }}</dd>
+        </div>
+        <div>
+          <dt>Your score units</dt>
+          <dd class="score">{{ own.score.scoreUnits }}</dd>
+        </div>
+      }
+    </dl>
+    <h2 id="standings-title">Final standings</h2>
+    <ul class="rows" aria-labelledby="standings-title">
+      @for (player of result.participants; track player.playerId; let index = $index) {
+        @let tied =
+          (index > 0 && result.participants[index - 1].rank === player.rank) ||
+          result.participants.at(index + 1)?.rank === player.rank;
+        <li>
+          <strong
+            >{{ tied ? 'Tied rank' : 'Rank' }} {{ player.rank }} · {{ player.displayName }}</strong
+          >
+          @if (player.playerId === viewer()?.id) {
+            <span>You</span>
+          }
+          <span class="score">Score units: {{ player.score.scoreUnits }}</span>
+        </li>
+      }
+    </ul>
+    <h2>Question review</h2>
+    @for (question of result.questions; track question.questionNumber) {
+      @let own = question.ownResult;
+      @let unanswered = own.selectedChoiceId === null;
+      @let correct = own.selectedChoiceId === question.correctChoiceId;
+      <section class="question" [attr.aria-labelledby]="'question-' + question.questionNumber">
+        <h3 [id]="'question-' + question.questionNumber">
+          {{ question.questionNumber }}. {{ question.text }}
+        </h3>
+        <p>
+          <strong>{{ unanswered ? 'No answer' : correct ? 'Correct' : 'Incorrect' }}</strong>
+        </p>
+        <ul>
+          @for (choice of question.choices; track choice.choiceId) {
+            <li>
+              {{ choice.text }}
+              @if (choice.choiceId === question.correctChoiceId) {
+                <strong> · Correct answer</strong>
+              }
+              @if (choice.choiceId === own.selectedChoiceId) {
+                <strong> · Your answer</strong>
+              }
+            </li>
+          }
+        </ul>
+        <dl>
+          <div>
+            <dt>Attempts</dt>
+            <dd>{{ own.attemptCount }}</dd>
+          </div>
+          <div>
+            <dt>Response time</dt>
+            <dd>
+              {{ own.finalAnsweredMs === null ? 'No response' : own.finalAnsweredMs + ' ms' }}
+            </dd>
+          </div>
+          <div>
+            <dt>Score units awarded</dt>
+            <dd class="score">{{ own.score.scoreUnits }}</dd>
+          </div>
+        </dl>
+      </section>
+    }
+  }
+</section>
