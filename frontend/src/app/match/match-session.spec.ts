@@ -270,6 +270,32 @@ describe('Match Session authoritative lifecycle', () => {
     expect(match.snapshot()).toEqual(question(7, 1, 'z', 3));
     expect(match.canAnswer(id, 'x')).toBe(false);
   });
+  it('uses only snapshots when multiple accepted answer receipts arrive before publication', async () => {
+    await open();
+    const first = match.answer(id, 'q1', 'x');
+    socket.accept(1, 5);
+    await first;
+    const second = match.answer(id, 'q1', 'y');
+    socket.accept(2, 6);
+    await second;
+    expect(match.snapshot()).toEqual(question(4));
+    expect(match.awaitingAnswerView()).toBe(true);
+    expect(match.intent()?.commandId).toBe(socket.emitted[2].request.commandId);
+
+    // A delayed view can match the latest intent without establishing its mutation.
+    socket.receive('MatchSnapshot', question(5, 1, 'y'));
+    expect(match.snapshot()).toEqual(question(5, 1, 'y'));
+    expect(match.awaitingAnswerView()).toBe(true);
+    expect(match.intent()?.receiptVersion).toBe(6);
+
+    // A coalesced view can reflect a later answer from another session.
+    socket.receive('MatchSnapshot', question(7, 1, 'z', 3));
+    socket.receive('MatchSnapshot', question(6, 1, 'y', 2));
+    socket.accept(1, 5);
+    expect(match.snapshot()).toEqual(question(7, 1, 'z', 3));
+    expect(match.awaitingAnswerView()).toBe(false);
+    expect(match.canAnswer(id, 'x')).toBe(false);
+  });
   it('settles a same-choice no-op receipt without waiting for another version', async () => {
     await open();
     const answer = match.answer(id, 'q1', 'x');

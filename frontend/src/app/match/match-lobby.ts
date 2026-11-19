@@ -22,6 +22,15 @@ export class MatchLobby {
   protected readonly current = computed(() =>
     this.match.matchId() === this.id() ? this.match.snapshot() : undefined,
   );
+  protected readonly standings = computed(() => {
+    const snapshot = this.current();
+    return snapshot?.phase === 'REVEAL' || snapshot?.phase === 'FINISHED'
+      ? [...snapshot.state.participants].sort((first, second) => first.rank - second.rank)
+      : [];
+  });
+  protected readonly viewerStanding = computed(() =>
+    this.standings().find((player) => player.playerId === this.session.player()?.id),
+  );
   protected readonly copied = signal('');
   private readonly now = signal(Date.now());
   private readonly deadline = computed(() => {

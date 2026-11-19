@@ -1,10 +1,11 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter, Router } from '@angular/router';
 import { BehaviorSubject } from 'rxjs';
 import { Session } from '../auth/session.js';
 import { MatchLobby, leaveLobby } from './match-lobby.js';
 import { MATCH_SOCKET, MatchSession } from './match-session.js';
+import type { MatchSnapshot } from './match-snapshot.js';
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const rules = {
   questionCount: 10,
@@ -14,8 +15,39 @@ const rules = {
   maxAttempts: 3,
   earlyClose: false,
 };
+type Reveal = Extract<MatchSnapshot, { phase: 'REVEAL' }>;
+const round = {
+  questionNumber: 1,
+  questionCount: 10,
+  question: {
+    questionId: 'q',
+    text: 'Pick one',
+    choices: [
+      { choiceId: 'a', text: 'Alpha' },
+      { choiceId: 'b', text: 'Beta' },
+    ],
+  },
+  participants: [
+    { playerId: 'c', displayName: 'Charlie', score: { scoreUnits: '0' }, rank: 3 },
+    { playerId: 'b', displayName: 'Bob', score: { scoreUnits: '9007199254740993' }, rank: 1 },
+    { playerId: 'a', displayName: 'Alice', score: { scoreUnits: '9007199254740993' }, rank: 1 },
+  ],
+};
+function reveal(ownResult: Reveal['state']['ownResult']): Reveal {
+  return {
+    matchId: id,
+    version: 4,
+    phase: 'REVEAL',
+    state: {
+      ...round,
+      revealEndsAt: new Date(0).toISOString(),
+      question: { ...round.question, correctChoiceId: 'a' },
+      ownResult,
+    },
+  };
+}
 describe('Lobby route and presentation', () => {
-  const player = signal({ id: 'a', displayName: 'Alice' });
+  const player = signal<{ id: string; displayName: string } | undefined>(undefined);
   const factory = vi.fn();
   const params = new BehaviorSubject(convertToParamMap({ matchId: id }));
   beforeEach(() => {
@@ -173,6 +205,94 @@ describe('Lobby route and presentation', () => {
     expect(fixture.nativeElement.textContent).toContain('No live subscription');
     expect(await match.retry(other)).toBeUndefined();
   });
+  it.each([
+    { choice: 'a', correct: true, outcome: 'Correct', award: '9007199254740993', attempts: 2 },
+    { choice: 'b', correct: false, outcome: 'Incorrect', award: '0', attempts: 1 },
+    { choice: undefined, correct: false, outcome: 'No answer', award: '0', attempts: 0 },
+  ])('renders the $outcome reveal from the viewer result', async (result) => {
+    const match = TestBed.inject(MatchSession);
+    match.matchId.set(id);
+    match.connection.set('connected');
+    match.snapshot.set(
+      reveal({
+        ...(result.choice ? { selectedChoiceId: result.choice, finalAnsweredMs: 20 } : {}),
+        correct: result.correct,
+        questionScore: { scoreUnits: result.award },
+        attemptCount: result.attempts,
+      }),
+    );
+    const fixture = TestBed.createComponent(MatchLobby);
+    await fixture.whenStable();
+    const html: HTMLElement = fixture.nativeElement;
+    expect(html.textContent).toContain('Question 1 of 10 · Reveal');
+    expect(html.textContent).toContain('Pick one');
+    expect(html.querySelector('.round-result strong')?.textContent?.trim()).toBe(result.outcome);
+    expect(html.textContent).toContain('Score units awarded: ' + result.award);
+    expect(html.textContent).toContain(result.attempts + ' of 3 attempts confirmed');
+    const choices = html.querySelectorAll('.revealed-choices li');
+    expect(choices[0].textContent).toContain('Correct answer');
+    expect(choices[0].textContent?.includes('Your answer')).toBe(result.choice === 'a');
+    expect(choices[1].textContent?.includes('Your answer · Incorrect')).toBe(result.choice === 'b');
+    expect(html.textContent).toContain('Current standings');
+    expect(html.querySelector('.choices')).toBeNull();
+    expect(match.snapshot()?.phase).toBe('REVEAL');
+  });
+  it.each(['QUESTION_OPEN', 'FINISHED'] as const)(
+    'replaces reveal content when the server advances to %s',
+    async (phase) => {
+      const match = TestBed.inject(MatchSession);
+      match.matchId.set(id);
+      match.connection.set('connected');
+      match.snapshot.set(
+        reveal({ correct: false, questionScore: { scoreUnits: '0' }, attemptCount: 0 }),
+      );
+      const fixture = TestBed.createComponent(MatchLobby);
+      await fixture.whenStable();
+      const html: HTMLElement = fixture.nativeElement;
+      expect(html.querySelector('.revealed-choices')).not.toBeNull();
+      match.snapshot.set(
+        phase === 'QUESTION_OPEN'
+          ? {
+              matchId: id,
+              version: 5,
+              phase,
+              state: { ...round, questionNumber: 2, deadlineAt: new Date(0).toISOString() },
+            }
+          : { matchId: id, version: 5, phase, state: { participants: round.participants } },
+      );
+      await fixture.whenStable();
+      expect(html.querySelector('.revealed-choices')).toBeNull();
+      if (phase === 'QUESTION_OPEN') {
+        expect(html.textContent).toContain('Question 2 of 10');
+        expect(html.textContent).not.toContain('Correct answer');
+        expect(html.querySelectorAll('.choices button')).toHaveLength(2);
+        return;
+      }
+      expect(html.querySelector('[role="status"] > h2')?.textContent).toContain('Match finished');
+      expect(html.textContent).toContain('Your final rank: 1');
+      expect(html.textContent).toContain('Final standings');
+      const rows = Array.from(html.querySelectorAll('.standings li'), (row) => row.textContent);
+      expect(rows[0]).toMatch(/Tied rank 1.*Bob.*Tied winner.*9007199254740993/);
+      expect(rows[1]).toMatch(/Tied rank 1.*Alice.*You.*Tied winner.*9007199254740993/);
+      expect(rows[2]).toMatch(/Rank 3.*Charlie.*Score units: 0/);
+      expect(html.textContent).not.toMatch(/saved|committed|persisted/i);
+      expect(html.querySelector('[href*="history"]')).toBeNull();
+      const back = html.querySelector<HTMLAnchorElement>('nav a')!;
+      expect(back.textContent?.trim()).toBe('Back to Play');
+      expect(back.getAttribute('href')).toBe('/play');
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+      back.click();
+      expect(navigate.mock.calls[0][0].toString()).toBe('/play');
+      match.connection.set('lost');
+      await fixture.whenStable();
+      expect(html.textContent).toContain('This is the last known view');
+      expect(html.textContent).toContain('Final standings');
+      player.set(undefined);
+      await fixture.whenStable();
+      expect(html.querySelector('.standings')).toBeNull();
+      expect(navigate).toHaveBeenLastCalledWith('/login', { replaceUrl: true });
+    },
+  );
   it('route destruction clears the local socket state without dispatching Leave', async () => {
     const match = TestBed.inject(MatchSession);
     match.matchId.set(id);

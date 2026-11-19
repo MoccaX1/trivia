@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
 const origin = 'https://localhost:4200';
+const fullMatch = process.env.SMOKE_FULL_MATCH === '1';
 const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
 const fixtures = JSON.parse(
   await readFile('/smoke/lobby-fixtures.json', 'utf8').catch(() =>
@@ -58,7 +59,217 @@ async function login(page, account) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Create Match', exact: true })).toBeEnabled();
 }
+
+async function verifyStandings(page, participants, viewerId) {
+  const rows = page.getByRole('region', { name: /standings/i }).getByRole('listitem');
+  const ranked = [...participants].sort((a, b) => a.rank - b.rank);
+  await expect(rows).toHaveCount(ranked.length);
+  for (const [index, player] of ranked.entries()) {
+    const row = rows.nth(index);
+    await expect(row.getByText(new RegExp(`^(Tied rank|Rank) ${player.rank}$`))).toBeVisible();
+    await expect(row).toContainText(player.displayName);
+    await expect(
+      row.getByText(`Score units: ${player.score.scoreUnits}`, { exact: true }),
+    ).toBeVisible();
+    if (player.playerId === viewerId) await expect(row).toContainText('· You');
+  }
+}
+
+async function verifyFullMatch(matchId, players) {
+  const evidence = await Promise.all(
+    pages.map(async (page, index) => {
+      const viewer = players[index];
+      const seen = snapshots[index];
+      const questions = [];
+      const reveals = [];
+      const timerSamples = [];
+      assert.equal(
+        await page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches),
+        true,
+      );
+      const snapshot = async (phase, questionNumber) => {
+        const find = () =>
+          seen.findLast(
+            (item) =>
+              item.matchId === matchId &&
+              item.phase === phase &&
+              (questionNumber === undefined || item.state.questionNumber === questionNumber),
+          );
+        await expect
+          .poll(find, {
+            timeout: 20000,
+            message: `${viewer.username}: ${phase} ${questionNumber ?? ''}`,
+          })
+          .toBeTruthy();
+        return find();
+      };
+      const reflow = async (phase) => {
+        const overflow = await page.evaluate(() =>
+          document.documentElement.scrollWidth <= innerWidth
+            ? []
+            : [
+                { width: document.documentElement.scrollWidth, viewport: innerWidth },
+                ...[...document.querySelectorAll('main *')].flatMap((element) => {
+                  const { right } = element.getBoundingClientRect();
+                  return right > innerWidth
+                    ? [
+                        {
+                          tag: element.tagName,
+                          right,
+                          text: element.textContent?.trim().slice(0, 90),
+                        },
+                      ]
+                    : [];
+                }),
+              ],
+        );
+        assert.deepEqual(overflow, [], phase);
+      };
+      for (let number = 1; number <= 10; number++) {
+        const opened = await snapshot('QUESTION_OPEN', number);
+        const { question, questionCount } = opened.state;
+        questions.push(opened);
+        const group = page.getByRole('group', { name: question.text });
+        const buttons = group.getByRole('button');
+        await expect(
+          page.getByText(`Question ${number} of ${questionCount}`, { exact: true }),
+        ).toBeVisible();
+        await expect(page.getByRole('heading', { name: question.text, exact: true })).toBeVisible();
+        timerSamples.push(
+          await page.locator('.timer').evaluate((element) => ({
+            browserNow: Date.now(),
+            amount: element.textContent.trim(),
+          })),
+        );
+        await expect(buttons).toHaveText(question.choices.map((choice) => choice.text));
+        await expect(page.getByText(/0 of 3 attempts confirmed/)).toBeVisible();
+        assert.equal(opened.state.ownSubmission, undefined);
+        assert.equal('correctChoiceId' in question, false);
+        assert.equal('ownResult' in opened.state, false);
+        await expect(page.getByText('Correct answer', { exact: true })).toHaveCount(0);
+        await reflow(`Question ${number}`);
+        // The first demo question has Hanoi as the correct answer. Exercise A → B → A,
+        // a wrong answer, and a deliberate no-answer (guest, question two).
+        const choices =
+          number === 1 && index === 0 ? [0, 1, 0] : number === 2 && index === 1 ? [] : [index];
+        for (const [attempt, choiceIndex] of choices.entries()) {
+          const choice = question.choices[choiceIndex];
+          const button = buttons.nth(choiceIndex);
+          if (number === 1 && index === 0 && attempt === 0) {
+            await button.focus();
+            await expect(button).toBeFocused();
+            assert.equal(
+              await button.evaluate((element) => getComputedStyle(element).outlineStyle),
+              'solid',
+            );
+            await expect(button).toHaveAttribute('aria-pressed', 'false');
+            await page.keyboard.press('Enter');
+          } else {
+            await button.click();
+          }
+          await expect
+            .poll(
+              () =>
+                seen.findLast(
+                  (item) => item.phase === 'QUESTION_OPEN' && item.state.questionNumber === number,
+                )?.state.ownSubmission,
+            )
+            .toMatchObject({ choiceId: choice.choiceId, attemptCount: attempt + 1 });
+          await expect(button).toHaveAttribute('aria-pressed', 'true');
+          await expect(button).toContainText('Confirmed selection');
+          await expect(
+            page.getByText(new RegExp(`${attempt + 1} of 3 attempts confirmed`)),
+          ).toBeVisible();
+        }
+        if (choices.length === 3) {
+          await expect(page.getByText(/No answer changes remaining/)).toBeVisible();
+          for (const button of await buttons.all())
+            await expect(button).toHaveAttribute('aria-disabled', 'true');
+        }
+        if (number === 1)
+          await page.screenshot({
+            path: `test-results/gameplay-open-${index}.png`,
+            fullPage: true,
+          });
+        const revealed = await snapshot('REVEAL', number);
+        reveals.push(revealed);
+        const { state } = revealed;
+        const result = state.ownResult;
+        const chosen = choices.at(-1);
+        assert.equal(result.attemptCount, choices.length);
+        assert.equal(
+          result.selectedChoiceId,
+          chosen === undefined ? undefined : question.choices[chosen].choiceId,
+        );
+        if (number === 1) assert.equal(result.correct, index === 0);
+        const outcome =
+          chosen === undefined ? 'No answer' : result.correct ? 'Correct' : 'Incorrect';
+        await expect(
+          page.getByText(`Question ${number} of ${questionCount} · Reveal`, { exact: true }),
+        ).toBeVisible();
+        await expect(page.getByRole('heading', { name: question.text, exact: true })).toBeVisible();
+        await expect(page.getByText(outcome, { exact: true })).toBeVisible();
+        await expect(
+          page.getByText(`Score units awarded: ${result.questionScore.scoreUnits}`, {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(
+          page.getByText(`${result.attemptCount} of 3 attempts confirmed`, { exact: true }),
+        ).toBeVisible();
+        const rows = page.getByRole('list', { name: 'Answer results' }).getByRole('listitem');
+        const correctIndex = question.choices.findIndex(
+          (choice) => choice.choiceId === state.question.correctChoiceId,
+        );
+        await expect(rows.nth(correctIndex)).toContainText(question.choices[correctIndex].text);
+        await expect(rows.nth(correctIndex)).toContainText('Correct answer');
+        if (chosen !== undefined)
+          await expect(rows.nth(chosen)).toContainText(
+            result.correct ? 'Your answer' : 'Your answer · Incorrect',
+          );
+        else await expect(page.getByText(/Your answer/)).toHaveCount(0);
+        await verifyStandings(page, state.participants, viewer.id);
+        await reflow(`Reveal ${number}`);
+        if (number === 1)
+          await page.screenshot({
+            path: `test-results/gameplay-reveal-${index}.png`,
+            fullPage: true,
+          });
+      }
+      const finished = await snapshot('FINISHED');
+      const standing = finished.state.participants.find((player) => player.playerId === viewer.id);
+      await expect(page.getByRole('heading', { name: 'Match finished' })).toBeVisible();
+      await expect(
+        page.getByText(`Your final rank: ${standing.rank}`, { exact: true }),
+      ).toBeVisible();
+      await expect(page.locator('.round-result')).toContainText(
+        `Score units: ${standing.score.scoreUnits}`,
+      );
+      await verifyStandings(page, finished.state.participants, viewer.id);
+      await reflow('Finished');
+      await page.screenshot({
+        path: `test-results/gameplay-finished-${index}.png`,
+        fullPage: true,
+      });
+      page.once('dialog', (dialog) => dialog.accept());
+      await page.getByRole('link', { name: 'Back to Play' }).click();
+      await expect(page).toHaveURL(origin + '/play');
+      return { viewer, questions, reveals, finished, timerSamples };
+    }),
+  );
+  assert.deepEqual(evidence[0].finished, evidence[1].finished);
+  assert.deepEqual(errors, []);
+  await writeFile(
+    '/smoke/gameplay-evidence.json',
+    JSON.stringify({ matchId, players: evidence }, null, 2),
+  );
+  console.log(
+    `PASS: Match ${matchId}, both viewers observed 10 questions, 10 reveals, FINISHED and Back to Play.`,
+  );
+}
+
 try {
+  const firstPlayer = fixtures.players.length;
   for (const [i, page] of pages.entries()) {
     await page.goto(origin + '/register');
     await page.getByLabel('Username', { exact: true }).fill(accounts[i].username);
@@ -123,72 +334,101 @@ try {
   await host.keyboard.press('Tab');
   assert.ok(await host.locator(':focus').count());
   await host.getByRole('button', { name: 'Start Match', exact: true }).click();
-  const latest = (index, number = 1) =>
-    snapshots[index].findLast(
-      (snapshot) => snapshot.phase === 'QUESTION_OPEN' && snapshot.state.questionNumber === number,
-    );
-  await Promise.all(
-    pages.map(async (page, index) => {
-      await expect(page.getByText('Question 1 of 10', { exact: true })).toBeVisible();
-      await expect.poll(() => latest(index)?.state.question.questionId).toBeTruthy();
-      const question = latest(index).state.question;
-      await expect(page.getByRole('heading', { name: question.text, exact: true })).toBeVisible();
-      const group = page.getByRole('group', { name: question.text });
-      for (const [attempt, choice] of question.choices.slice(0, 2).entries()) {
-        const button = group.getByRole('button', { name: choice.text, exact: true });
-        if (index === 0 && attempt === 0) {
-          await button.focus();
-          await expect(button).toHaveAttribute('aria-pressed', 'false');
-          assert.equal(latest(index).state.ownSubmission, undefined);
-          await page.keyboard.press('Enter');
-        } else await button.click();
-        await expect
-          .poll(() => latest(index)?.state.ownSubmission)
-          .toMatchObject({
-            choiceId: choice.choiceId,
-            attemptCount: attempt + 1,
-          });
+  if (fullMatch) {
+    await verifyFullMatch(id, fixtures.players.slice(firstPlayer));
+  } else {
+    const latest = (index, number = 1) =>
+      snapshots[index].findLast(
+        (snapshot) =>
+          snapshot.phase === 'QUESTION_OPEN' && snapshot.state.questionNumber === number,
+      );
+    await Promise.all(
+      pages.map(async (page, index) => {
+        await expect(page.getByText('Question 1 of 10', { exact: true })).toBeVisible();
+        await expect.poll(() => latest(index)?.state.question.questionId).toBeTruthy();
+        const question = latest(index).state.question;
+        await expect(page.getByRole('heading', { name: question.text, exact: true })).toBeVisible();
+        const group = page.getByRole('group', { name: question.text });
+        for (const [attempt, choice] of question.choices.slice(0, 2).entries()) {
+          const button = group.getByRole('button', { name: choice.text, exact: true });
+          if (index === 0 && attempt === 0) {
+            await button.focus();
+            await expect(button).toHaveAttribute('aria-pressed', 'false');
+            assert.equal(latest(index).state.ownSubmission, undefined);
+            await page.keyboard.press('Enter');
+          } else await button.click();
+          await expect
+            .poll(() => latest(index)?.state.ownSubmission)
+            .toMatchObject({
+              choiceId: choice.choiceId,
+              attemptCount: attempt + 1,
+            });
+          await expect(
+            group.getByRole('button', { name: choice.text + ' Confirmed selection', exact: true }),
+          ).toHaveAttribute('aria-pressed', 'true');
+          await expect(
+            page.getByText(new RegExp(`${attempt + 1} of 3 attempts confirmed`)),
+          ).toBeVisible();
+        }
+        const reveal = () =>
+          snapshots[index].find(
+            (snapshot) => snapshot.phase === 'REVEAL' && snapshot.state.questionNumber === 1,
+          );
+        await expect.poll(reveal, { timeout: 15000 }).toBeTruthy();
+        const { state } = reveal();
+        const results = page.getByRole('list', { name: 'Answer results' });
+        const correct = state.question.choices.find(
+          (choice) => choice.choiceId === state.question.correctChoiceId,
+        );
+        await expect(results.getByText(correct.text, { exact: true })).toBeVisible();
+        await expect(results.getByText(/Correct answer/)).toBeVisible();
+        await expect(results.getByText(/Your answer/)).toBeVisible();
         await expect(
-          group.getByRole('button', { name: choice.text + ' Confirmed selection', exact: true }),
-        ).toHaveAttribute('aria-pressed', 'true');
-        await expect(
-          page.getByText(new RegExp(`${attempt + 1} of 3 attempts confirmed`)),
+          page.getByText('Score units awarded: ' + state.ownResult.questionScore.scoreUnits, {
+            exact: true,
+          }),
         ).toBeVisible();
-      }
-      await expect(page.getByText('Question 2 of 10', { exact: true })).toBeVisible({
-        timeout: 25000,
-      });
-      await expect.poll(() => latest(index, 2)?.state.question.questionId).toBeTruthy();
-      assert.equal(latest(index, 2).state.ownSubmission, undefined);
-      await expect(page.getByText(/0 of 3 attempts confirmed/)).toBeVisible();
-      await expect(page.locator('.choices [aria-pressed="true"]')).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Retry original command' })).toHaveCount(0);
-    }),
-  );
-  assert.equal(await host.locator('input').count(), 0);
-  await contexts[1].setOffline(true);
-  await expect(
-    guest.getByText('Connection lost. This is the last known view', { exact: false }),
-  ).toBeVisible({ timeout: 45000 });
-  await contexts[1].setOffline(false);
-  await expect(
-    guest.getByText('Connection lost. This is the last known view', { exact: false }),
-  ).toBeVisible();
-  await guest.reload();
-  await expect(guest.getByRole('heading', { name: 'No live subscription' })).toBeVisible();
-  await guest.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(guest).toHaveURL(/\/login/);
-  await host.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(host).toHaveURL(/\/login/);
-  assert.deepEqual(errors, []);
-  await writeFile(
-    '/smoke/credentials.json',
-    JSON.stringify({ username: accounts[0].username, password: accounts[0].password }),
-    { mode: 0o600 },
-  );
-  console.log(
-    'PASS: real two-player Lobby, Host Start, QUESTION_OPEN, two confirmed answers per viewer checked against authorized snapshots, question rollover, clipboard and keyboard, offline/stale/reload, and logout.',
-  );
+        await expect(
+          page.getByText(state.ownResult.attemptCount + ' of 3 attempts confirmed', {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Current standings' })).toBeVisible();
+        await expect(page.getByText('Question 2 of 10', { exact: true })).toBeVisible({
+          timeout: 25000,
+        });
+        await expect.poll(() => latest(index, 2)?.state.question.questionId).toBeTruthy();
+        assert.equal(latest(index, 2).state.ownSubmission, undefined);
+        await expect(page.getByText(/0 of 3 attempts confirmed/)).toBeVisible();
+        await expect(page.locator('.choices [aria-pressed="true"]')).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Retry original command' })).toHaveCount(0);
+      }),
+    );
+    assert.equal(await host.locator('input').count(), 0);
+    await contexts[1].setOffline(true);
+    await expect(
+      guest.getByText('Connection lost. This is the last known view', { exact: false }),
+    ).toBeVisible({ timeout: 45000 });
+    await contexts[1].setOffline(false);
+    await expect(
+      guest.getByText('Connection lost. This is the last known view', { exact: false }),
+    ).toBeVisible();
+    await guest.reload();
+    await expect(guest.getByRole('heading', { name: 'No live subscription' })).toBeVisible();
+    await guest.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(guest).toHaveURL(/\/login/);
+    await host.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(host).toHaveURL(/\/login/);
+    assert.deepEqual(errors, []);
+    await writeFile(
+      '/smoke/credentials.json',
+      JSON.stringify({ username: accounts[0].username, password: accounts[0].password }),
+      { mode: 0o600 },
+    );
+    console.log(
+      'PASS: real two-player Lobby, Host Start, QUESTION_OPEN, confirmed answers and REVEAL checked against authorized snapshots, question rollover, clipboard and keyboard, offline/stale/reload, and logout.',
+    );
+  }
 } finally {
   await save();
   await browser.close();

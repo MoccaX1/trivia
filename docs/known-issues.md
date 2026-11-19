@@ -20,7 +20,7 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 
 | Category | OPEN | ACCEPTED | RESOLVED | Total |
 |---|---:|---:|---:|---:|
-| BUG | 0 | 0 | 8 | 8 |
+| BUG | 1 | 0 | 8 | 9 |
 | LIM | 0 | 4 | 0 | 4 |
 | RISK | 1 | 0 | 4 | 5 |
 | DEBT | 2 | 0 | 0 | 2 |
@@ -29,7 +29,7 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 | OPS | 2 | 0 | 1 | 3 |
 | DEF | 0 | 2 | 3 | 5 |
 
-Total: **45** records; **6 ACCEPTED**, **15 OPEN**, **24 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **46** records; **6 ACCEPTED**, **16 OPEN**, **24 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
@@ -37,6 +37,7 @@ Includes accepted limitations/exclusions; resolved decisions/mitigations retain 
 
 | ID | Concern | Status | Severity | Proposed target |
 |---|---|---|---|---|
+| [BUG-009](#bug-009) | Clock disagreement can display zero throughout a live question | OPEN | MEDIUM | before demo |
 | [LIM-001](#lim-001) | Post-commit deadline scheduling can stall a Match | ACCEPTED | HIGH | current demo |
 | [LIM-002](#lim-002) | Active Matches are lost on process restart | ACCEPTED | HIGH | current demo |
 | [LIM-003](#lim-003) | Completed aggregates and retry receipts retained until shutdown | ACCEPTED | MEDIUM | later hardening |
@@ -694,7 +695,15 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 - **Concern:** Stage 4A found that a Match route parameter change could expose the previous Match's retry. The existing ACK path also lacked question and dispatch boundaries needed for answer commands.
 - **Resolution:** Match retries require the route Match ID and, for answers, the current question. Answer intent retires on question or phase change. Dispatch identity prevents a previous callback from settling a later dispatch with the same command ID. Only snapshots set confirmed selections.
 - **Verification:** [Route tests](../frontend/src/app/match/match-lobby.spec.ts) exercise Match A → B in the same component. [MatchSession tests](../frontend/src/app/match/match-session.spec.ts) exercise same-envelope retry, stale ACKs, rollover and receipt versus snapshot ordering. The [two-player Chromium smoke](../frontend/scripts/lobby-browser-smoke.mjs) verified first and changed answers against authorized snapshots and retirement on question 2.
+- **Stage 4D regression:** A deterministic MatchSession test delivers two accepted receipts before either publication, then a delayed matching snapshot, a conflicting newer snapshot, and obsolete delivery. Confirmed selection and attempts follow snapshots throughout. The matching snapshot does not settle the newer receipt.
 - **Limitations:** A receipt may precede or outlast publication. Match recovery remains deferred under [DEC-006](#dec-006) and [DEC-012](#dec-012).
+
+### BUG-009 — Clock disagreement can display zero throughout a live question
+
+- **Category / status:** BUG / OPEN. **Severity / priority:** MEDIUM / UNDECIDED.
+- **Evidence:** Stage 4D captured ten open-phase samples per Chromium viewer. The server deadlines appeared roughly 107 minutes behind the browser wall clock, and all 20 countdown samples displayed zero. Both viewers still submitted valid answers and saw all ten authoritative phase transitions. [Countdown derivation](../frontend/src/app/match/match-lobby.ts) combines the server deadline with browser wall time. The [backend clock](../backend/src/runtime/match-time.ts) uses a wall-clock anchor plus monotonic elapsed time. The event that caused the clocks to disagree was not established.
+- **Impact:** Players can see zero while the server is still accepting answers. Server ingress timing, scoring and progression were verified independently.
+- **Next action:** Verify a live countdown on a clock-aligned demo stack. Any product change to compensate for clock disagreement requires a separate timing decision.
 
 ## 10. Historical coverage and evidence limitations
 

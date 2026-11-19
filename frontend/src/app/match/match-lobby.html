@@ -92,10 +92,82 @@
           }
         }
       } @else if (snapshot.phase === 'REVEAL') {
-        <h2 role="status">Question {{ snapshot.state.questionNumber }} reveal</h2>
-        <p>Waiting for the server to advance the Match.</p>
+        @let result = snapshot.state.ownResult;
+        <p class="supporting" role="status">
+          Question {{ snapshot.state.questionNumber }} of {{ snapshot.state.questionCount }} ·
+          Reveal
+        </p>
+        <h2>{{ snapshot.state.question.text }}</h2>
+        <p class="round-result">
+          <strong
+            [class.correct-choice]="result.correct"
+            [class.incorrect-choice]="result.selectedChoiceId && !result.correct"
+            [class.unanswered]="!result.selectedChoiceId"
+            >{{
+              !result.selectedChoiceId ? 'No answer' : result.correct ? 'Correct' : 'Incorrect'
+            }}</strong
+          >
+          <span>Score units awarded: {{ result.questionScore.scoreUnits }}</span>
+          <span>{{ result.attemptCount }} of 3 attempts confirmed</span>
+        </p>
+        <ul aria-label="Answer results" class="revealed-choices">
+          @for (choice of snapshot.state.question.choices; track choice.choiceId) {
+            @let correct = choice.choiceId === snapshot.state.question.correctChoiceId;
+            @let selected = choice.choiceId === result.selectedChoiceId;
+            <li [class.correct-choice]="correct" [class.incorrect-choice]="selected && !correct">
+              <span>{{ choice.text }}</span>
+              @if (correct || selected) {
+                <span class="supporting">
+                  @if (correct) {
+                    Correct answer
+                  }
+                  @if (correct && selected) {
+                    ·
+                  }
+                  @if (selected) {
+                    {{ correct ? 'Your answer' : 'Your answer · Incorrect' }}
+                  }
+                </span>
+              }
+            </li>
+          }
+        </ul>
       } @else {
-        <h2 role="status">Match finished</h2>
+        <div role="status">
+          <h2>Match finished</h2>
+        </div>
+        @if (viewerStanding(); as viewer) {
+          <p class="round-result">
+            <strong>Your final rank: {{ viewer.rank }}</strong>
+            <span>Score units: {{ viewer.score.scoreUnits }}</span>
+          </p>
+        }
+      }
+      @if (snapshot.phase === 'REVEAL' || snapshot.phase === 'FINISHED') {
+        <section aria-labelledby="standings-title">
+          <h3 id="standings-title">
+            {{ snapshot.phase === 'FINISHED' ? 'Final standings' : 'Current standings' }}
+          </h3>
+          @let ranked = standings();
+          <ol class="standings" role="list">
+            @for (player of ranked; track player.playerId; let index = $index) {
+              @let tied =
+                (index > 0 && ranked[index - 1].rank === player.rank) ||
+                ranked.at(index + 1)?.rank === player.rank;
+              <li>
+                <span>
+                  <strong>{{ tied ? 'Tied rank' : 'Rank' }} {{ player.rank }}</strong>
+                  · {{ player.displayName
+                  }}{{ player.playerId === session.player()?.id ? ' · You' : '' }}
+                  @if (snapshot.phase === 'FINISHED' && player.rank === 1) {
+                    <span class="supporting"> · {{ tied ? 'Tied winner' : 'Winner' }}</span>
+                  }
+                </span>
+                <span class="score">Score units: {{ player.score.scoreUnits }}</span>
+              </li>
+            }
+          </ol>
+        </section>
       }
     } @else if (match.matchId() === id() && match.live()) {
       <h2>Waiting for the server view</h2>
@@ -123,8 +195,9 @@
       </button>
     }
     <nav aria-label="Lobby navigation">
-      <a routerLink="/play">Back to Match entry</a
-      ><button type="button" (click)="session.logout()" [disabled]="!!session.pending()">
+      <a routerLink="/play">{{
+        current()?.phase === 'FINISHED' ? 'Back to Play' : 'Back to Match entry'
+      }}</a><button type="button" (click)="session.logout()" [disabled]="!!session.pending()">
         Sign out
       </button>
     </nav>
