@@ -20,7 +20,7 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 
 | Category | OPEN | ACCEPTED | RESOLVED | Total |
 |---|---:|---:|---:|---:|
-| BUG | 0 | 0 | 7 | 7 |
+| BUG | 0 | 0 | 8 | 8 |
 | LIM | 0 | 4 | 0 | 4 |
 | RISK | 1 | 0 | 4 | 5 |
 | DEBT | 2 | 0 | 0 | 2 |
@@ -29,7 +29,7 @@ P0: immediate response; P1: next required gate; P2: scheduled improvement; P3: o
 | OPS | 2 | 0 | 1 | 3 |
 | DEF | 0 | 2 | 3 | 5 |
 
-Total: **44** records; **6 ACCEPTED**, **15 OPEN**, **23 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
+Total: **45** records; **6 ACCEPTED**, **15 OPEN**, **24 RESOLVED**. PLANNED, IN_PROGRESS and CLOSED: 0.
 
 ## 5. Active issues table
 
@@ -684,6 +684,17 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 - **Evidence:** [policy](../backend/src/transport/auth-policy.ts), [Engine.IO integration](../backend/src/transport/server.ts), [26 real-listener security regressions](../backend/tests/socket-origin.test.ts), and [Chromium smoke](../frontend/scripts/browser-smoke.mjs).
 - **Verification:** Full Docker backend suite with disposable PostgreSQL: **262 passed / 0 failed / 0 skipped** (236 existing plus 26 new). Chromium observed accepted polling GET/POST, polling-to-WebSocket upgrade, direct WebSocket and logout invalidation; opaque/null, disallowed same-site and cross-site browser Origins rejected. See [execution evidence](../frontend/README.md#remediation-verification).
 - **Limitations:** Fetch Metadata is not identity or cryptographic proof; non-browser clients still need a valid session and trusted HTTPS path. Missing required browser/referrer evidence fails closed. Active-Match recovery remains unsupported.
+
+<a id="bug-008"></a>
+
+### BUG-008 — Match retry and answer receipts require current context
+
+- **Category / status:** BUG / RESOLVED. **Severity / priority:** MEDIUM / UNDECIDED.
+- **Component / phase:** Frontend Match route and MatchSession, Stage 4B.
+- **Concern:** Stage 4A found that a Match route parameter change could expose the previous Match's retry. The existing ACK path also lacked question and dispatch boundaries needed for answer commands.
+- **Resolution:** Match retries require the route Match ID and, for answers, the current question. Answer intent retires on question or phase change. Dispatch identity prevents a previous callback from settling a later dispatch with the same command ID. Only snapshots set confirmed selections.
+- **Verification:** [Route tests](../frontend/src/app/match/match-lobby.spec.ts) exercise Match A → B in the same component. [MatchSession tests](../frontend/src/app/match/match-session.spec.ts) exercise same-envelope retry, stale ACKs, rollover and receipt versus snapshot ordering. The [two-player Chromium smoke](../frontend/scripts/lobby-browser-smoke.mjs) verified first and changed answers against authorized snapshots and retirement on question 2.
+- **Limitations:** A receipt may precede or outlast publication. Match recovery remains deferred under [DEC-006](#dec-006) and [DEC-012](#dec-012).
 
 ## 10. Historical coverage and evidence limitations
 

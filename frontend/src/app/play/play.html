@@ -41,7 +41,7 @@
         <a [routerLink]="['/play/match', match.matchId()]">Open acknowledged Match</a>
       }
       <p class="status" role="status">{{ match.statusMessage() || 'Connecting securely…' }}</p>
-      @if (match.uncertain() && match.canSend()) {
+      @if (match.canRetry()) {
         <button type="button" (click)="retry()">Retry original command</button>
       }
       @if (session.verification() === 'unavailable' && match.live()) {

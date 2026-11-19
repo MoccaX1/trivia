@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
 import { Session } from '../auth/session.js';
+import { isMatchSnapshot, type MatchSnapshot } from './match-snapshot.js';
 
 export const MATCH_SOCKET = new InjectionToken<() => Socket>('Match socket', {
   providedIn: 'root',
@@ -17,19 +18,13 @@ export const MATCH_SOCKET = new InjectionToken<() => Socket>('Match socket', {
     io({ path: '/socket.io', withCredentials: true, autoConnect: false, reconnection: false }),
 });
 export const matchIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export interface LobbyView {
-  matchId: string;
-  version: number;
-  phase: 'WAITING' | 'QUESTION_OPEN' | 'REVEAL' | 'FINISHED';
-  hostPlayerId?: string;
-  participants: { playerId: string; displayName: string }[];
-}
 export type MatchCommand = 'CreateMatch' | 'JoinMatch' | 'StartMatch';
 interface Intent {
-  event: MatchCommand;
-  commandId: string;
-  payload: Record<string, string>;
+  event: MatchCommand | 'SubmitAnswer';
+  readonly commandId: string;
+  readonly payload: Readonly<Record<string, string>>;
   status: 'pending' | 'uncertain' | 'accepted' | 'rejected';
+  receiptVersion?: number;
 }
 interface Ack {
   commandId: string;
@@ -49,6 +44,11 @@ const messages: Record<string, string> = {
   INVALID_MATCH_PHASE: 'This action is no longer available in the current Match phase.',
   MATCH_FINISHED: 'This Match has finished.',
   INVALID_REQUEST: 'The request was not valid. Check the Match ID.',
+  QUESTION_NOT_CURRENT: 'That question is no longer current.',
+  INVALID_CHOICE: 'That answer is unavailable for this question.',
+  ANSWER_WINDOW_CLOSED: 'The server closed the answer window.',
+  MAX_ATTEMPTS_EXCEEDED: 'The server has recorded all three attempts.',
+  INVALID_TIMING: 'The server could not validate the answer timing.',
 };
 const unknownOutcome =
   'The outcome is unknown. Do not assume the action failed. An explicit retry uses the same command; a receipt cannot restore a lost subscription.';
@@ -65,7 +65,7 @@ export class MatchSession {
   private finish?: () => void;
   readonly connection = signal<'idle' | 'connecting' | 'connected' | 'lost'>('idle');
   readonly matchId = signal<string | undefined>(undefined);
-  readonly snapshot = signal<LobbyView | undefined>(undefined);
+  readonly snapshot = signal<MatchSnapshot | undefined>(undefined);
   readonly intent = signal<Intent | undefined>(undefined);
   readonly feedback = signal('');
   readonly live = computed(() => this.connection() === 'connected');
@@ -84,10 +84,12 @@ export class MatchSession {
   });
   readonly busy = computed(() => this.intent()?.status === 'pending');
   readonly uncertain = computed(() => this.intent()?.status === 'uncertain');
+  private readonly lobby = computed(() => {
+    const snapshot = this.snapshot();
+    return snapshot?.phase === 'WAITING' ? snapshot.state : undefined;
+  });
   readonly isHost = computed(
-    () =>
-      this.snapshot()?.phase === 'WAITING' &&
-      this.snapshot()?.hostPlayerId === this.auth.player()?.id,
+    () => !!this.lobby() && this.lobby()?.hostPlayerId === this.auth.player()?.id,
   );
   readonly canStart = computed(
     () =>
@@ -96,8 +98,51 @@ export class MatchSession {
       this.isHost() &&
       !this.busy() &&
       !this.uncertain() &&
-      (this.snapshot()?.participants.length ?? 0) >= 2,
+      (this.lobby()?.participants.length ?? 0) >= 2,
   );
+  readonly awaitingAnswerView = computed(() => {
+    const intent = this.intent();
+    return (
+      intent?.event === 'SubmitAnswer' &&
+      intent.status === 'accepted' &&
+      (intent.receiptVersion ?? 0) > (this.snapshot()?.version ?? 0)
+    );
+  });
+
+  canAnswer(matchId: string, choiceId: string): boolean {
+    const snapshot = this.snapshot();
+    if (
+      !this.canSend() ||
+      this.busy() ||
+      this.uncertain() ||
+      snapshot?.matchId !== matchId ||
+      snapshot.phase !== 'QUESTION_OPEN'
+    )
+      return false;
+    const { question, ownSubmission } = snapshot.state;
+    return (
+      choiceId !== ownSubmission?.choiceId &&
+      (ownSubmission?.attemptCount ?? 0) < 3 &&
+      !(this.awaitingAnswerView() && this.intent()?.payload['choiceId'] === choiceId) &&
+      question.choices.some((choice) => choice.choiceId === choiceId)
+    );
+  }
+
+  async answer(matchId: string, questionId: string, choiceId: string): Promise<void> {
+    const snapshot = this.snapshot();
+    if (
+      snapshot?.phase !== 'QUESTION_OPEN' ||
+      snapshot.state.question.questionId !== questionId ||
+      !this.canAnswer(matchId, choiceId)
+    )
+      return;
+    await this.send({
+      event: 'SubmitAnswer',
+      commandId: crypto.randomUUID(),
+      payload: Object.freeze({ matchId, questionId, choiceId }),
+      status: 'pending',
+    });
+  }
 
   constructor() {
     effect(() => {
@@ -207,7 +252,7 @@ export class MatchSession {
       this.feedback.set('Enter the complete Match UUID exactly as shared by the Host.');
       return;
     }
-    if (event === 'StartMatch' && !this.canStart()) return;
+    if (event === 'StartMatch' && (!this.canStart() || matchId !== this.matchId())) return;
     if (event !== 'StartMatch') {
       this.snapshot.set(undefined);
       this.matchId.set(matchId);
@@ -215,15 +260,28 @@ export class MatchSession {
     return this.send({
       event,
       commandId: crypto.randomUUID(),
-      payload: matchId ? { matchId } : {},
+      payload: matchId ? Object.freeze({ matchId }) : Object.freeze({}),
       status: 'pending',
     });
   }
-  retry(): Promise<string | undefined> {
+  canRetry(routeMatchId?: string): boolean {
     const intent = this.intent();
-    return intent?.status === 'uncertain' && this.canSend()
-      ? this.send(intent)
-      : Promise.resolve(undefined);
+    if (intent?.status !== 'uncertain' || !this.canSend()) return false;
+    if (routeMatchId === undefined)
+      return intent.event === 'CreateMatch' || intent.event === 'JoinMatch';
+    if (routeMatchId !== this.matchId() || routeMatchId !== intent.payload['matchId']) return false;
+    const snapshot = this.snapshot();
+    if (intent.event === 'StartMatch') return snapshot?.phase === 'WAITING' && this.isHost();
+    return (
+      intent.event === 'SubmitAnswer' &&
+      snapshot?.phase === 'QUESTION_OPEN' &&
+      snapshot.state.question.questionId === intent.payload['questionId']
+    );
+  }
+
+  retry(routeMatchId?: string): Promise<string | undefined> {
+    const intent = this.intent();
+    return intent && this.canRetry(routeMatchId) ? this.send(intent) : Promise.resolve(undefined);
   }
   private send(intent: Intent): Promise<string | undefined> {
     const epoch = this.epoch;
@@ -231,9 +289,10 @@ export class MatchSession {
     this.intent.set({ ...intent, status: 'pending' });
     this.feedback.set('Waiting for server confirmation…');
     return new Promise((resolve) => {
-      this.finish = () => resolve(undefined);
+      const finish = () => resolve(undefined);
+      this.finish = finish;
       this.timer = setTimeout(() => {
-        if (epoch !== this.epoch || this.intent()?.commandId !== intent.commandId) {
+        if (epoch !== this.epoch || generation !== this.auth.generation || this.finish !== finish) {
           resolve(undefined);
           return;
         }
@@ -243,18 +302,24 @@ export class MatchSession {
       }, 5000);
       this.socket?.emit(
         intent.event,
-        { commandId: intent.commandId, payload: intent.payload },
+        Object.freeze({ commandId: intent.commandId, payload: intent.payload }),
         (ack: Ack) => {
           if (
             epoch !== this.epoch ||
             generation !== this.auth.generation ||
-            this.intent()?.commandId !== intent.commandId ||
             ack?.commandId !== intent.commandId
           ) {
             resolve(undefined);
             return;
           }
+          if (ack.status === 'error' && ack.error?.code === 'UNAUTHENTICATED')
+            this.auth.unauthenticated(generation);
+          if (generation !== this.auth.generation || this.finish !== finish) {
+            resolve(undefined);
+            return;
+          }
           clearTimeout(this.timer);
+          this.finish = undefined;
           if (
             ack.status === 'accepted' &&
             Number.isSafeInteger(ack.version) &&
@@ -264,7 +329,16 @@ export class MatchSession {
             (intent.event === 'CreateMatch' || ack.matchId === intent.payload['matchId'])
           ) {
             this.matchId.set(ack.matchId);
-            this.intent.set({ ...intent, status: 'accepted' });
+            this.intent.set({ ...intent, status: 'accepted', receiptVersion: ack.version });
+            if (intent.event === 'SubmitAnswer') {
+              this.feedback.set(
+                this.awaitingAnswerView()
+                  ? 'Answer receipt accepted. Waiting for the server view.'
+                  : 'Answer receipt accepted. The selection shown is the current server view.',
+              );
+              resolve(ack.matchId);
+              return;
+            }
             this.apply(this.buffered);
             this.buffered = undefined;
             this.feedback.set(
@@ -284,7 +358,6 @@ export class MatchSession {
                 : (messages[code ?? ''] ??
                     'The server rejected this action. No new state is implied.'),
             );
-            if (code === 'UNAUTHENTICATED') this.auth.unauthenticated(generation);
             resolve(undefined);
           }
         },
@@ -292,46 +365,36 @@ export class MatchSession {
     });
   }
   private apply(value: unknown): void {
-    if (!value || typeof value !== 'object') return;
-    const item = value as {
-      matchId?: unknown;
-      version?: unknown;
-      phase?: unknown;
-      state?: { hostPlayerId?: unknown; participants?: unknown };
-    };
+    const viewer = this.auth.player();
     if (
-      item.matchId !== this.matchId() ||
-      !Number.isSafeInteger(item.version) ||
-      (item.version as number) < 1 ||
-      (item.version as number) <= (this.snapshot()?.version ?? 0)
+      !viewer ||
+      !isMatchSnapshot(value, viewer.id) ||
+      value.matchId !== this.matchId() ||
+      value.version <= (this.snapshot()?.version ?? 0)
     )
       return;
-    if (!['WAITING', 'QUESTION_OPEN', 'REVEAL', 'FINISHED'].includes(String(item.phase))) return;
-    const participants = item.state?.participants;
+    this.snapshot.set(value);
+    const intent = this.intent();
     if (
-      !Array.isArray(participants) ||
-      !participants.every(
-        (p) => p && typeof p.playerId === 'string' && typeof p.displayName === 'string',
-      ) ||
-      !participants.some((p) => p.playerId === this.auth.player()?.id)
-    )
-      return;
-    if (
-      item.phase === 'WAITING' &&
-      (typeof item.state?.hostPlayerId !== 'string' ||
-        !participants.some((p) => p.playerId === item.state?.hostPlayerId))
-    )
-      return;
-    this.snapshot.set({
-      matchId: item.matchId as string,
-      version: item.version as number,
-      phase: item.phase as LobbyView['phase'],
-      hostPlayerId: item.state?.hostPlayerId as string | undefined,
-      participants: participants.map((p) => ({ playerId: p.playerId, displayName: p.displayName })),
-    });
-    if (this.intent()?.status === 'accepted') {
+      (intent?.event === 'SubmitAnswer' &&
+        (value.phase !== 'QUESTION_OPEN' ||
+          value.state.question.questionId !== intent.payload['questionId'])) ||
+      (intent?.event === 'StartMatch' && value.phase !== 'WAITING')
+    ) {
+      clearTimeout(this.timer);
+      this.finish?.();
+      this.finish = undefined;
+      this.intent.set(undefined);
+      this.feedback.set('');
+    } else if (
+      intent?.event === 'SubmitAnswer' &&
+      intent.status === 'accepted' &&
+      !this.awaitingAnswerView()
+    ) {
+      this.feedback.set('Answer receipt accepted. The selection shown is the current server view.');
+    } else if (intent?.event !== 'SubmitAnswer' && intent?.status === 'accepted') {
       this.feedback.set(
-        item.phase === 'WAITING'
+        value.phase === 'WAITING'
           ? 'Lobby view is up to date.'
           : 'The server has moved this Match beyond the lobby.',
       );

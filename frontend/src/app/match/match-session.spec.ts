@@ -34,13 +34,13 @@ class FakeSocket {
   receive(event: string, value?: unknown) {
     this.handlers.get(event)?.(value);
   }
-  accept(index = 0) {
+  accept(index = 0, version = 1) {
     const command = this.emitted[index];
     command.ack({
       commandId: command.request.commandId,
       status: 'accepted',
       matchId: id,
-      version: 1,
+      version,
     });
   }
 }
@@ -51,6 +51,14 @@ function lobby(version = 1, matchId = id) {
     phase: 'WAITING',
     state: {
       hostPlayerId: 'a',
+      rules: {
+        questionCount: 10,
+        answerWindowMs: 10000,
+        revealDurationMs: 5000,
+        allowAnswerChanges: true,
+        maxAttempts: 3,
+        earlyClose: false,
+      },
       participants: [
         { playerId: 'a', displayName: 'Alice' },
         { playerId: 'b', displayName: 'Bob' },
@@ -58,9 +66,38 @@ function lobby(version = 1, matchId = id) {
     },
   };
 }
+function question(version: number, number = 1, choiceId?: string, attemptCount = 1) {
+  return {
+    matchId: id,
+    version,
+    phase: 'QUESTION_OPEN',
+    state: {
+      questionNumber: number,
+      questionCount: 10,
+      deadlineAt: '2026-11-20T00:00:00Z',
+      question: {
+        questionId: 'q' + number,
+        text: 'Pick one',
+        choices: ['x', 'y', 'z'].map((choiceId) => ({ choiceId, text: choiceId })),
+      },
+      participants: lobby().state.participants.map((person) => ({
+        ...person,
+        score: { scoreUnits: '9007199254740993' },
+        rank: 1,
+      })),
+      ownSubmission: choiceId ? { choiceId, attemptCount, finalAnsweredMs: 1 } : undefined,
+    },
+  };
+}
 describe('Match Session authoritative lifecycle', () => {
   let socket: FakeSocket;
   let match: MatchSession;
+  async function open() {
+    const join = match.command('JoinMatch', id);
+    socket.accept();
+    await join;
+    socket.receive('MatchSnapshot', question(4));
+  }
   const player = signal<{ id: string; displayName: string } | undefined>({
     id: 'a',
     displayName: 'Alice',
@@ -113,7 +150,7 @@ describe('Match Session authoritative lifecycle', () => {
     socket.receive('LobbySnapshot', lobby());
     socket.accept();
     await result;
-    expect(match.snapshot()?.participants).toHaveLength(2);
+    expect(match.snapshot()?.state.participants).toHaveLength(2);
   });
   it('sends exact Join payload without optimistic membership', async () => {
     const result = match.command('JoinMatch', id);
@@ -153,16 +190,188 @@ describe('Match Session authoritative lifecycle', () => {
     socket.receive('LobbySnapshot', { ...lobby(), state: { participants: [] } });
     expect(match.snapshot()).toBeUndefined();
   });
-  it('uses one version tracker across handoff without exposing questions', async () => {
+  it('uses one version tracker across handoff and retains authorized question data', async () => {
     const result = match.command('JoinMatch', id);
     socket.accept();
     await result;
     socket.receive('LobbySnapshot', lobby(2));
-    socket.receive('MatchSnapshot', { ...lobby(3), phase: 'QUESTION_OPEN' });
+    socket.receive('MatchSnapshot', question(3));
     socket.receive('LobbySnapshot', lobby(2));
     expect(match.snapshot()?.phase).toBe('QUESTION_OPEN');
     expect(match.canStart()).toBe(false);
-    expect(match.snapshot()).not.toHaveProperty('question');
+    expect(match.snapshot()).toEqual(question(3));
+  });
+  it('rejects malformed higher versions without consuming them and accepts reveal and finished', async () => {
+    await open();
+    const valid = question(9);
+    socket.receive('MatchSnapshot', { ...valid, state: { ...valid.state, deadlineAt: 'bad' } });
+    socket.receive('MatchSnapshot', { ...valid, matchId: other });
+    socket.receive('MatchSnapshot', {
+      ...valid,
+      state: { ...valid.state, participants: valid.state.participants.slice(1) },
+    });
+    expect(match.snapshot()?.version).toBe(4);
+    socket.receive('MatchSnapshot', valid);
+    socket.receive('MatchSnapshot', question(9, 1, 'x'));
+    expect(match.snapshot()).toEqual(valid);
+    const reveal = {
+      ...valid,
+      version: 10,
+      phase: 'REVEAL',
+      state: {
+        ...valid.state,
+        question: { ...valid.state.question, correctChoiceId: 'x' },
+        revealEndsAt: valid.state.deadlineAt,
+        ownResult: { correct: false, attemptCount: 0, questionScore: { scoreUnits: '0' } },
+      },
+    };
+    socket.receive('MatchSnapshot', reveal);
+    expect(match.snapshot()).toEqual(reveal);
+    const finished = {
+      matchId: id,
+      version: 50,
+      phase: 'FINISHED',
+      state: { participants: valid.state.participants },
+    };
+    socket.receive('MatchSnapshot', finished);
+    expect(match.snapshot()).toEqual(finished);
+    expect(
+      match.snapshot()?.state.participants.map((p) => 'score' in p && [p.rank, p.score]),
+    ).toEqual([
+      [1, { scoreUnits: '9007199254740993' }],
+      [1, { scoreUnits: '9007199254740993' }],
+    ]);
+  });
+  it('keeps receipt acceptance separate from the authoritative answer and allows a deliberate change', async () => {
+    await open();
+    const first = match.answer(id, 'q1', 'x');
+    expect(socket.emitted[1].event).toBe('SubmitAnswer');
+    expect(socket.emitted[1].request).toEqual({
+      commandId: expect.any(String),
+      payload: { matchId: id, questionId: 'q1', choiceId: 'x' },
+    });
+    await match.answer(id, 'q1', 'x');
+    expect(socket.emitted).toHaveLength(2);
+    socket.accept(1, 5);
+    await first;
+    expect(match.snapshot()).toEqual(question(4));
+    expect(match.awaitingAnswerView()).toBe(true);
+    expect(match.canAnswer(id, 'x')).toBe(false);
+    expect(match.canAnswer(id, 'y')).toBe(true);
+    socket.receive('MatchSnapshot', question(5, 1, 'x'));
+    expect(match.awaitingAnswerView()).toBe(false);
+    const change = match.answer(id, 'q1', 'y');
+    expect(socket.emitted[2].request.commandId).not.toBe(socket.emitted[1].request.commandId);
+    socket.receive('MatchSnapshot', question(6, 1, 'y', 2));
+    expect(match.intent()?.status).toBe('pending'); // Matching selection is not command attribution.
+    socket.receive('MatchSnapshot', question(7, 1, 'z', 3));
+    socket.accept(2, 6);
+    await change;
+    expect(match.snapshot()).toEqual(question(7, 1, 'z', 3));
+    expect(match.canAnswer(id, 'x')).toBe(false);
+  });
+  it('settles a same-choice no-op receipt without waiting for another version', async () => {
+    await open();
+    const answer = match.answer(id, 'q1', 'x');
+    // Another authenticated session confirmed the same choice before this receipt.
+    socket.receive('MatchSnapshot', question(5, 1, 'x'));
+    socket.accept(1, 5);
+    await answer;
+    expect(match.awaitingAnswerView()).toBe(false);
+    expect(match.canAnswer(id, 'x')).toBe(false);
+    expect(match.canAnswer(id, 'y')).toBe(true);
+  });
+  it('scopes an uncertain retry to the route and dispatch, then retires it at rollover', async () => {
+    vi.useFakeTimers();
+    await open();
+    const first = match.answer(id, 'q1', 'x');
+    await vi.advanceTimersByTimeAsync(5000);
+    await first;
+    expect(match.uncertain()).toBe(true);
+    await match.retry(other);
+    await match.retry();
+    expect(socket.emitted).toHaveLength(2);
+    const retry = match.retry(id);
+    expect(socket.emitted[2].request).toEqual(socket.emitted[1].request);
+    expect(socket.emitted[2].request.payload).toBe(socket.emitted[1].request.payload);
+    socket.accept(1, 5);
+    expect(match.intent()?.status).toBe('pending');
+    await vi.advanceTimersByTimeAsync(5000);
+    await retry;
+    expect(match.uncertain()).toBe(true);
+    socket.receive('MatchSnapshot', question(8, 2));
+    expect(match.intent()).toBeUndefined();
+    socket.accept(2, 5);
+    expect(match.intent()).toBeUndefined();
+    expect(match.snapshot()).toEqual(question(8, 2));
+    expect(match.canRetry(id)).toBe(false);
+    expect(match.canAnswer(id, 'x')).toBe(true);
+  });
+  it('checks connection, session and question context and still handles current auth failure after rollover', async () => {
+    await open();
+    auth.verification.set('pending');
+    await match.answer(id, 'q1', 'x');
+    auth.verification.set(undefined);
+    match.connection.set('lost');
+    await match.answer(id, 'q1', 'x');
+    match.connection.set('connected');
+    await match.answer(id, 'old', 'x');
+    expect(socket.emitted).toHaveLength(1);
+    const answer = match.answer(id, 'q1', 'x');
+    socket.receive('MatchSnapshot', question(8, 2));
+    await answer;
+    const sent = socket.emitted[1];
+    sent.ack({
+      commandId: sent.request.commandId,
+      status: 'error',
+      error: { code: 'UNAUTHENTICATED' },
+    });
+    expect(auth.unauthenticated).toHaveBeenCalledWith(1);
+    expect(match.intent()).toBeUndefined();
+  });
+  it('keeps a confirmed choice when a change is rejected, then retires a pending choice on reveal', async () => {
+    await open();
+    socket.receive('MatchSnapshot', question(5, 1, 'x'));
+    const change = match.answer(id, 'q1', 'y');
+    const sent = socket.emitted[1];
+    sent.ack({
+      commandId: sent.request.commandId,
+      matchId: id,
+      version: 5,
+      status: 'rejected',
+      error: { code: 'INVALID_CHOICE' },
+    });
+    await change;
+    expect(match.snapshot()).toEqual(question(5, 1, 'x'));
+    expect(match.feedback()).toContain('unavailable for this question');
+    const pending = match.answer(id, 'q1', 'z');
+    const { state } = question(5);
+    socket.receive('MatchSnapshot', {
+      matchId: id,
+      version: 7,
+      phase: 'REVEAL',
+      state: {
+        questionNumber: 1,
+        questionCount: 10,
+        participants: state.participants,
+        question: { ...state.question, correctChoiceId: 'x' },
+        revealEndsAt: state.deadlineAt,
+        ownResult: {
+          selectedChoiceId: 'x',
+          correct: true,
+          questionScore: { scoreUnits: '1' },
+          attemptCount: 1,
+          finalAnsweredMs: 1,
+        },
+      },
+    });
+    await pending;
+    socket.accept(2, 6);
+    expect(match.snapshot()?.phase).toBe('REVEAL');
+    expect(match.intent()).toBeUndefined();
+    expect(match.feedback()).toBe('');
+    expect(match.canRetry(id)).toBe(false);
+    expect(match.canAnswer(id, 'z')).toBe(false);
   });
   it('enables Start only for the snapshot Host with two players', async () => {
     const result = match.command('JoinMatch', id);
@@ -206,7 +415,7 @@ describe('Match Session authoritative lifecycle', () => {
     socket.receive('LobbySnapshot', lobby());
     socket.receive('disconnect', 'transport close');
     expect(match.live()).toBe(false);
-    expect(match.snapshot()?.participants).toHaveLength(2);
+    expect(match.snapshot()?.state.participants).toHaveLength(2);
     expect(match.feedback()).toContain('does not remove membership');
     expect(match.canStart()).toBe(false);
   });

@@ -24,10 +24,10 @@
       @if (snapshot.phase === 'WAITING') {
         <h2>Waiting for players</h2>
         <ul aria-label="Participants">
-          @for (player of snapshot.participants; track player.playerId) {
+          @for (player of snapshot.state.participants; track player.playerId) {
             <li>
               <span>{{ player.displayName }}</span><span class="supporting"
-                >{{ player.playerId === snapshot.hostPlayerId ? 'Host' : 'Player'
+                >{{ player.playerId === snapshot.state.hostPlayerId ? 'Host' : 'Player'
                 }}{{ player.playerId === session.player()?.id ? ' · You' : '' }}</span
               >
             </li>
@@ -41,9 +41,61 @@
         } @else {
           <p class="supporting">The Host starts the Match when everyone is here.</p>
         }
+      } @else if (snapshot.phase === 'QUESTION_OPEN') {
+        <p class="supporting" role="status">
+          Question {{ snapshot.state.questionNumber }} of {{ snapshot.state.questionCount }}
+        </p>
+        <p class="timer">
+          Time left: {{ seconds() === undefined ? 'Unavailable' : seconds() + 's' }}
+        </p>
+        <h2 id="question-title">{{ snapshot.state.question.text }}</h2>
+        <div class="choices" role="group" aria-labelledby="question-title">
+          @for (choice of snapshot.state.question.choices; track choice.choiceId) {
+            @let selected = snapshot.state.ownSubmission?.choiceId === choice.choiceId;
+            @let requested = requestedChoice() === choice.choiceId;
+            @let disabled = !match.canAnswer(id(), choice.choiceId);
+            <button
+              type="button"
+              [attr.aria-disabled]="disabled"
+              [attr.aria-pressed]="selected"
+              (click)="match.answer(id(), snapshot.state.question.questionId, choice.choiceId)"
+            >
+              {{ choice.text }}
+              @if (selected) {
+                <span class="supporting">Confirmed selection</span>
+              }
+              @if (requested) {
+                <span class="supporting">{{
+                  match.uncertain()
+                    ? 'Outcome unknown'
+                    : match.awaitingAnswerView()
+                      ? 'Receipt accepted'
+                      : 'Submitting…'
+                }}</span>
+              }
+            </button>
+          }
+        </div>
+        <p class="supporting" role="status">
+          {{ snapshot.state.ownSubmission?.attemptCount ?? 0 }} of 3 attempts confirmed.
+          @if (snapshot.state.ownSubmission?.attemptCount === 3) {
+            No answer changes remaining.
+          } @else {
+            Selecting a different answer uses an attempt.
+          }
+        </p>
+        @for (player of snapshot.state.participants; track player.playerId) {
+          @if (player.playerId === session.player()?.id) {
+            <p class="supporting">
+              Score units: {{ player.score.scoreUnits }} · Rank {{ player.rank }}
+            </p>
+          }
+        }
+      } @else if (snapshot.phase === 'REVEAL') {
+        <h2 role="status">Question {{ snapshot.state.questionNumber }} reveal</h2>
+        <p>Waiting for the server to advance the Match.</p>
       } @else {
-        <h2>Beyond the lobby</h2>
-        <p>The server has moved this Match beyond WAITING. Gameplay UI arrives in Stage 4.</p>
+        <h2 role="status">Match finished</h2>
       }
     } @else if (match.matchId() === id() && match.live()) {
       <h2>Waiting for the server view</h2>
@@ -59,11 +111,11 @@
         delivery.
       </p>
     }
-    <p class="feedback" role="status">{{ match.statusMessage() }}</p>
-    @if (match.uncertain() && match.canSend()) {
-      <button type="button" (click)="match.retry()" [disabled]="match.busy()">
-        Retry original command
-      </button>
+    <p class="feedback" role="status">
+      {{ match.matchId() === id() ? match.statusMessage() : '' }}
+    </p>
+    @if (match.canRetry(id())) {
+      <button type="button" (click)="match.retry(id())">Retry original command</button>
     }
     @if (session.verification() === 'unavailable') {
       <button type="button" (click)="session.revalidate()" [disabled]="session.retryBlocked()">

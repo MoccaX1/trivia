@@ -21,7 +21,33 @@ const contexts = await Promise.all(
 );
 const pages = await Promise.all(contexts.map((c) => c.newPage()));
 const errors = [];
-for (const page of pages) page.on('pageerror', (e) => errors.push(e.message));
+const snapshots = pages.map(() => []);
+for (const [index, page] of pages.entries()) {
+  page.on('pageerror', (e) => errors.push(e.message));
+  const record = (payload) => {
+    for (const packet of payload.split(String.fromCharCode(30))) {
+      if (!packet.startsWith('42[')) continue;
+      const [event, snapshot] = JSON.parse(packet.slice(2));
+      if (event === 'MatchSnapshot') snapshots[index].push(snapshot);
+    }
+  };
+  page.on('websocket', (socket) =>
+    socket.on('framereceived', ({ payload }) => {
+      if (typeof payload === 'string') record(payload);
+    }),
+  );
+  page.on('response', async (response) => {
+    if (
+      response.ok() &&
+      response.url().includes('/socket.io/') &&
+      response.request().method() === 'GET' &&
+      response.url().includes('transport=polling')
+    ) {
+      const payload = await response.text().catch(() => '');
+      record(payload);
+    }
+  });
+}
 async function save() {
   await writeFile('/smoke/lobby-fixtures.json', JSON.stringify(fixtures));
 }
@@ -97,10 +123,48 @@ try {
   await host.keyboard.press('Tab');
   assert.ok(await host.locator(':focus').count());
   await host.getByRole('button', { name: 'Start Match', exact: true }).click();
-  for (const page of pages)
-    await expect(
-      page.getByText('The server has moved this Match beyond WAITING.', { exact: false }),
-    ).toBeVisible();
+  const latest = (index, number = 1) =>
+    snapshots[index].findLast(
+      (snapshot) => snapshot.phase === 'QUESTION_OPEN' && snapshot.state.questionNumber === number,
+    );
+  await Promise.all(
+    pages.map(async (page, index) => {
+      await expect(page.getByText('Question 1 of 10', { exact: true })).toBeVisible();
+      await expect.poll(() => latest(index)?.state.question.questionId).toBeTruthy();
+      const question = latest(index).state.question;
+      await expect(page.getByRole('heading', { name: question.text, exact: true })).toBeVisible();
+      const group = page.getByRole('group', { name: question.text });
+      for (const [attempt, choice] of question.choices.slice(0, 2).entries()) {
+        const button = group.getByRole('button', { name: choice.text, exact: true });
+        if (index === 0 && attempt === 0) {
+          await button.focus();
+          await expect(button).toHaveAttribute('aria-pressed', 'false');
+          assert.equal(latest(index).state.ownSubmission, undefined);
+          await page.keyboard.press('Enter');
+        } else await button.click();
+        await expect
+          .poll(() => latest(index)?.state.ownSubmission)
+          .toMatchObject({
+            choiceId: choice.choiceId,
+            attemptCount: attempt + 1,
+          });
+        await expect(
+          group.getByRole('button', { name: choice.text + ' Confirmed selection', exact: true }),
+        ).toHaveAttribute('aria-pressed', 'true');
+        await expect(
+          page.getByText(new RegExp(`${attempt + 1} of 3 attempts confirmed`)),
+        ).toBeVisible();
+      }
+      await expect(page.getByText('Question 2 of 10', { exact: true })).toBeVisible({
+        timeout: 25000,
+      });
+      await expect.poll(() => latest(index, 2)?.state.question.questionId).toBeTruthy();
+      assert.equal(latest(index, 2).state.ownSubmission, undefined);
+      await expect(page.getByText(/0 of 3 attempts confirmed/)).toBeVisible();
+      await expect(page.locator('.choices [aria-pressed="true"]')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Retry original command' })).toHaveCount(0);
+    }),
+  );
   assert.equal(await host.locator('input').count(), 0);
   await contexts[1].setOffline(true);
   await expect(
@@ -123,7 +187,7 @@ try {
     { mode: 0o600 },
   );
   console.log(
-    'PASS: real two-player Register/Login/Create/Join; two authoritative players and Host; Host-only Start/handoff; clipboard; offline/stale/reload limitation; logout cleanup; responsive 320px/200%, keyboard and reduced motion.',
+    'PASS: real two-player Lobby, Host Start, QUESTION_OPEN, two confirmed answers per viewer checked against authorized snapshots, question rollover, clipboard and keyboard, offline/stale/reload, and logout.',
   );
 } finally {
   await save();
