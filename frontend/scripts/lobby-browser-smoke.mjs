@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
 const origin = 'https://localhost:4200';
 const fullMatch = process.env.SMOKE_FULL_MATCH === '1';
+const countdownOnly = process.env.SMOKE_COUNTDOWN === '1';
 const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
 const fixtures = JSON.parse(
   await readFile('/smoke/lobby-fixtures.json', 'utf8').catch(() =>
@@ -76,6 +77,7 @@ async function verifyStandings(page, participants, viewerId) {
 }
 
 async function verifyFullMatch(matchId, players) {
+  const questionLimit = countdownOnly ? 2 : 10;
   const evidence = await Promise.all(
     pages.map(async (page, index) => {
       const viewer = players[index];
@@ -125,7 +127,7 @@ async function verifyFullMatch(matchId, players) {
         );
         assert.deepEqual(overflow, [], phase);
       };
-      for (let number = 1; number <= 10; number++) {
+      for (let number = 1; number <= questionLimit; number++) {
         const opened = await snapshot('QUESTION_OPEN', number);
         const { question, questionCount } = opened.state;
         questions.push(opened);
@@ -135,12 +137,45 @@ async function verifyFullMatch(matchId, players) {
           page.getByText(`Question ${number} of ${questionCount}`, { exact: true }),
         ).toBeVisible();
         await expect(page.getByRole('heading', { name: question.text, exact: true })).toBeVisible();
-        timerSamples.push(
-          await page.locator('.timer').evaluate((element) => ({
+        const readTimer = async () => {
+          const reading = await page.locator('.timer').evaluate((element) => ({
             browserNow: Date.now(),
             amount: element.textContent.trim(),
-          })),
-        );
+          }));
+          if (!countdownOnly) return reading;
+          const current = seen.findLast(
+            (item) =>
+              item.matchId === matchId &&
+              item.phase === 'QUESTION_OPEN' &&
+              item.state.question.questionId === question.questionId,
+          );
+          return {
+            ...reading,
+            questionId: question.questionId,
+            version: current.version,
+            deadlineAt: current.state.deadlineAt,
+          };
+        };
+        const firstReading = await readTimer();
+        timerSamples.push(firstReading);
+        const saveTimers = () =>
+          writeFile(
+            `/smoke/countdown-viewer-${index}.json`,
+            JSON.stringify({ matchId, viewer, timerSamples }, null, 2),
+          );
+        const assertTimer = (reading) => {
+          const seconds = Number(/^Time left: (\d+)s$/.exec(reading.amount)?.[1]);
+          const expected = Math.max(
+            0,
+            Math.ceil((Date.parse(reading.deadlineAt) - reading.browserNow) / 1000),
+          );
+          assert.ok(seconds > 0 && Math.abs(seconds - expected) <= 1, JSON.stringify(reading));
+          return seconds;
+        };
+        if (countdownOnly) {
+          await saveTimers();
+          assertTimer(firstReading);
+        }
         await expect(buttons).toHaveText(question.choices.map((choice) => choice.text));
         await expect(page.getByText(/0 of 3 attempts confirmed/)).toBeVisible();
         assert.equal(opened.state.ownSubmission, undefined);
@@ -185,6 +220,23 @@ async function verifyFullMatch(matchId, players) {
           await expect(page.getByText(/No answer changes remaining/)).toBeVisible();
           for (const button of await buttons.all())
             await expect(button).toHaveAttribute('aria-disabled', 'true');
+        }
+        if (countdownOnly) {
+          let later;
+          await expect
+            .poll(
+              async () => {
+                later = await readTimer();
+                return Number(/^Time left: (\d+)s$/.exec(later.amount)?.[1]);
+              },
+              { timeout: 4500 },
+            )
+            .toBeLessThan(assertTimer(firstReading));
+          timerSamples.push(later);
+          await saveTimers();
+          assertTimer(later);
+          assert.ok(later.version >= firstReading.version);
+          assert.equal(later.deadlineAt, firstReading.deadlineAt);
         }
         if (number === 1)
           await page.screenshot({
@@ -236,6 +288,16 @@ async function verifyFullMatch(matchId, players) {
             fullPage: true,
           });
       }
+      if (countdownOnly) {
+        assert.notEqual(timerSamples[0].questionId, timerSamples[2].questionId);
+        assert.ok(timerSamples[2].version > reveals[0].version);
+        assert.ok(Date.parse(timerSamples[2].deadlineAt) > Date.parse(timerSamples[0].deadlineAt));
+        for (const [i, reveal] of reveals.entries()) {
+          assert.equal(reveal.state.question.questionId, questions[i].state.question.questionId);
+          assert.ok(reveal.version > timerSamples[i * 2 + 1].version);
+        }
+        return { viewer, questions, reveals, timerSamples };
+      }
       const finished = await snapshot('FINISHED');
       const standing = finished.state.participants.find((player) => player.playerId === viewer.id);
       await expect(page.getByRole('heading', { name: 'Match finished' })).toBeVisible();
@@ -260,11 +322,13 @@ async function verifyFullMatch(matchId, players) {
   assert.deepEqual(evidence[0].finished, evidence[1].finished);
   assert.deepEqual(errors, []);
   await writeFile(
-    '/smoke/gameplay-evidence.json',
+    countdownOnly ? '/smoke/countdown-evidence.json' : '/smoke/gameplay-evidence.json',
     JSON.stringify({ matchId, players: evidence }, null, 2),
   );
   console.log(
-    `PASS: Match ${matchId}, both viewers observed 10 questions, 10 reveals, FINISHED and Back to Play.`,
+    countdownOnly
+      ? `PASS: Match ${matchId}, both viewers observed decreasing countdowns, answers and two server reveals.`
+      : `PASS: Match ${matchId}, both viewers observed 10 questions, 10 reveals, FINISHED and Back to Play.`,
   );
 }
 
@@ -334,7 +398,7 @@ try {
   await host.keyboard.press('Tab');
   assert.ok(await host.locator(':focus').count());
   await host.getByRole('button', { name: 'Start Match', exact: true }).click();
-  if (fullMatch) {
+  if (fullMatch || countdownOnly) {
     await verifyFullMatch(id, fixtures.players.slice(firstPlayer));
   } else {
     const latest = (index, number = 1) =>
