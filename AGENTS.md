@@ -31,10 +31,10 @@ Match state; PostgreSQL stores identity and completed History.
 
 ## Commands & Style
 
-Run all backend Node/npm/TypeScript commands inside Docker, with the application
-working directory `backend/` (images use `/app`). Do not depend on host Node or nvm.
-From the repository root, use the commands in `README.md`, for example:
-`docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --build --rm tools npm run check`.
+Use the active host NVM Node/npm without overriding PATH. Prefer native frontend
+`npm run check`, backend static checks and backend `npm run test:unit`.
+Prefer Codex's native apply_patch for ordinary source and test edits. Use scripts
+for bulk transformations where they help.
 Use strict TypeScript, ESM `.js` import specifiers, two-space indentation,
 single quotes, and Prettier. Run ESLint; preserve module import restrictions.
 Prefer descriptive camelCase functions and kebab-case filenames. Avoid custom DI,
@@ -43,6 +43,11 @@ speculative ports, factories, and unused modules.
 ## Tests & Verification
 
 Tests use Node's test runner through `tsx`; name files `backend/tests/*.test.ts`.
+Use Docker for PostgreSQL, full backend regression, real socket integration and
+full-stack browser acceptance. From `backend/`, run `npm run test:docker`.
+Provision the isolated `trivia_test` database once and configure its
+`TEST_DATABASE_URL` in the ignored `backend/.env`. See `README.md` for setup.
+Rebuild the tools image after backend changes that affect its copied inputs.
 Use real ephemeral listeners for transport tests and controlled time for future
 gameplay tests. Assert invariants, rejection/no-op preservation, and regressions.
 Run typecheck, lint, formatting checks, tests, and build. For lifecycle/infrastructure

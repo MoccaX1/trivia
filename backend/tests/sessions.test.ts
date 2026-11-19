@@ -39,7 +39,7 @@ for (const boundary of ['idle', 'absolute', 'coincident'] as const) {
         assert.equal(!!(await store.resolve(token)), offset < 0);
         if (offset < 0) set(boundary === 'idle' ? idleMs * 2 - 1 : absoluteMs);
         fire();
-        originalTimer.callback();
+        originalTimer!.callback();
         await store.revoke(token);
         assert.equal(await store.resolve(token), null);
         assert.equal(await store.watch(token, () => assert.fail('Expired session watched')), null);
@@ -180,7 +180,7 @@ test('work admitted one millisecond before absolute expiry may settle after sock
   set(absoluteMs);
   assert.equal(await store.resolve(token), null); // Profile wins the race against the timer.
   fire();
-  timer.callback();
+  timer!.callback();
   assert.equal(await store.act(token, () => assert.fail('Expired command admitted')), null);
   complete('accepted');
   assert.equal(await admitted.value, 'accepted');

@@ -15,6 +15,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "tsx --test tests/*.test.ts",
+    "test:unit": "node --import tsx --test tests/active-scoreboard.test.ts tests/answer-submission.test.ts tests/config.test.ts tests/login.test.ts tests/match-time.test.ts tests/sessions.test.ts",
+    "test:docker": "cd .. && docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --rm tools sh -c 'node --import tsx --input-type=module -e \"import { readConfig } from \\\"./src/config.ts\\\"; import { connectPostgres } from \\\"./src/persistence/postgres.ts\\\"; const url = process.env.TEST_DATABASE_URL; if (!url) throw new Error(\\\"TEST_DATABASE_URL is required for full regression\\\"); const config = readConfig({ DATABASE_URL: url }).database; if (!config.database.endsWith(\\\"_test\\\")) throw new Error(\\\"TEST_DATABASE_URL must name a *_test database\\\"); const pool = connectPostgres(config); try { const { rows } = await pool.query(\\\"SELECT current_database() AS name\\\"); if (rows[0]?.name !== config.database) throw new Error(\\\"Connected database does not match TEST_DATABASE_URL\\\"); console.log(\\\"Verified test database:\\\", rows[0].name); } finally { await pool.end(); }\" && npm test'",
     "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs",
     "migrate": "npm run build && node --env-file-if-exists=.env scripts/migrate.mjs",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build",

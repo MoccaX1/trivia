@@ -6,9 +6,9 @@ persistence, and participant-authorized HTTP History. `frontend/` contains the
 Stage 1 Angular foundation; shared designs and the
 [frontend API contract](docs/api-contract.md) remain in `docs/`.
 
-Run Compose from the repository root. Backend package scripts run inside Docker
-at `/app`, the image's backend application directory. Do not use host Node/npm/nvm
-or run Angular CLI from `backend/`.
+Run Compose from the repository root. Use your active NVM Node/npm for frontend
+checks, backend static checks and pure unit tests. Run PostgreSQL, the full
+backend regression, real socket tests and full-stack browser checks in Docker.
 
 For Docker-first Angular tooling, local HTTPS certificates, browser smoke checks,
 and the narrowly authenticated same-origin polling policy, see the
@@ -35,9 +35,8 @@ remain authoritative. Open/deferred policies require an approved decision.
 ## Prerequisites
 
 - Docker Engine with Docker Compose v2 or newer.
-- Docker images pin Node.js 26.13.0 LTS (Debian Bookworm); tools and production use
-  the same runtime. All Node/npm commands run in Docker,
-  with isolated dependencies/builds and disposable PostgreSQL.
+- Use the existing host NVM environment for native commands without overriding
+  PATH. Docker images pin Node.js 26.13.0 LTS and isolate dependencies and builds.
 - Free local ports 3000 and 5432, or alternatives set in `backend/.env`.
 
 If ports are occupied, change `PORT` and `POSTGRES_PORT` in `backend/.env` before starting.
@@ -115,31 +114,61 @@ create `player` and `password_credential` and enforce canonical usernames. Playe
 Players can use the Stage 2.5 `/register` frontend and `POST /auth/register` contract.
 No separate public provisioning command is available.
 
-PostgreSQL integration tests require a separate database whose name ends in `_test`.
-For the default local Compose credentials, create one once with
-`docker compose -f compose.backend.yml --env-file backend/.env exec postgres createdb -U trivia trivia_test` (skip this step if it
-already exists). Set `TEST_DATABASE_URL` in your untracked `backend/.env` to a complete URL
-using host `postgres` and database `trivia_test`, then run:
+PostgreSQL integration tests use the isolated `trivia_test` database. Start
+PostgreSQL from the repository root, then create the database once if it does
+not already exist:
 
 ```sh
-docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --build --rm tools npm test
+docker compose -f compose.backend.yml --env-file backend/.env up -d --wait postgres
+docker compose -f compose.backend.yml --env-file backend/.env exec -T postgres sh -c 'createdb -U "$POSTGRES_USER" trivia_test'
 ```
+
+In the ignored `backend/.env`, set `TEST_DATABASE_URL` once to a complete
+PostgreSQL URL using your local database credentials, Compose host `postgres`,
+port `5432`, and database `trivia_test`. Keep the URL in that file so Compose
+loads it on each run. Build the tools image from the repository root:
+
+```sh
+docker compose -f compose.backend.yml --env-file backend/.env --profile tools build tools
+```
+
+Then run the full regression from `backend/`:
+
+```sh
+npm run test:docker
+```
+
+Build the tools image the first time and after changes to its copied inputs
+(backend source, tests, migrations, package files or tooling configuration).
+Repeat `test:docker` without rebuilding when those inputs are unchanged.
+The script checks that `TEST_DATABASE_URL` names a `*_test` database and verifies
+the connected database before starting `npm test`. A missing URL fails the
+command instead of skipping database coverage. Keep PostgreSQL healthy before
+running it. Docker access is subject to the session's approval policy, including
+when invoked through npm.
 
 The tests verify the database name before writing and clean up only their own
 Player fixtures. They apply migrations only to the isolated test database. Keep credentials out
 of committed files and command output.
 
-## Backend tooling inside Docker
+## Hybrid verification
 
-All package commands below are backend-local. From the repository root use:
+From the repository root, run these checks natively:
 
 ```sh
-docker compose -f compose.backend.yml --env-file backend/.env --profile tools run --build --rm tools npm run typecheck
+npm --prefix frontend run check
+npm --prefix backend run typecheck
+npm --prefix backend run lint
+npm --prefix backend run format:check
+npm --prefix backend run build
+npm --prefix backend run test:unit
 ```
 
-Images copy `backend/` into `/app`, install clean dependencies and keep builds in
-the container. Rebuild after edits. The standard tools service has no source bind
-mount and does not use the host's `backend/node_modules` or `backend/dist`.
+The unit subset uses Node's `tsx` loader and an explicit list of test files that
+run without socket listeners, PostgreSQL or subprocess fixtures. Use
+`test:docker` for the full regression. The tools image copies backend sources
+into `/app` and uses its own dependencies and build output. See the
+[frontend README](frontend/README.md) for the Docker browser smoke commands.
 
 | Command                                   | Purpose                                                                  |
 | ----------------------------------------- | ------------------------------------------------------------------------ |
