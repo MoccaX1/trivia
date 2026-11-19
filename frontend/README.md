@@ -1,8 +1,8 @@
-# Trivia frontend — Stage 3
+# Trivia M1 frontend
 
 Angular 22 SPA with self-registration, login, session verification, Match entry,
-a realtime WAITING Lobby and Host Start handoff. Gameplay and History UI remain
-unimplemented. The accepted Docker/HTTPS foundation is unchanged. Follow [design guidelines](../docs/frontend-design-guidelines.md)
+a realtime WAITING Lobby, ten-question gameplay, final standings and committed Match History.
+Follow the [design guidelines](../docs/frontend-design-guidelines.md)
 and the [API contract](../docs/api-contract.md).
 
 ## Match entry and WAITING Lobby
@@ -15,7 +15,10 @@ membership or restore a subscription. Return to entry for an explicit Join;
 already-present membership cannot restore delivery through a fresh Join.
 
 The Host can Start with at least two current participants. The server leaving
-WAITING shows a Stage 3 handoff only: no question, answer, timer, score or History UI.
+WAITING opens the first question. During QUESTION_OPEN, answer choices submit
+immediately and the countdown estimates time remaining. REVEAL displays the
+server result and standings. FINISHED offers History Detail and Back to Play.
+History reads committed results. If Detail is unavailable, Refresh manually.
 Snapshots share one increasing version tracker; receipts never advance it. A
 five-second client timeout or interrupted operation is uncertain, not rejected.
 An explicit retry preserves command ID/event/payload; no automatic mutation retry,
@@ -147,15 +150,15 @@ Verification: 74 Angular + 3 proxy tests; full backend suite 305 tests, all zero
 failed/skipped, through Docker. Real Chromium registration, existing authentication
 and Origin/polling/WebSocket smoke are required; screenshots are under ignored
 test-results. Human screen-reader speech review remains outstanding; no complete
-WCAG compliance claim is made. No Match/Lobby/gameplay/History UI is added.
+WCAG compliance claim is made.
 
 ## Versions and checks
 
-Pinned framework/compiler 22.2.5, CLI/build 22.2.6, TypeScript 6.0.3, RxJS 7.8.2,
+Pinned framework/compiler 22.2.6, CLI/build 22.2.7, TypeScript 6.0.3, RxJS 7.8.2,
 Node 26.13.0, npm 11.20.0. Angular 22 supports Node 26 and TypeScript >=6.0 <6.1:
 [official compatibility](https://angular.dev/reference/versions).
-Direct package versions and the frontend lockfile are pinned; all Node/npm/CLI
-commands run in Docker at `/app`, independently of backend dependencies.
+Direct package versions and the frontend lockfile are pinned. Use host NVM for
+native verification. Docker browser and development tooling run in `/app`.
 
 ## Local development
 
@@ -202,8 +205,24 @@ After changing package files, stop frontend, rebuild its image, run `npm ci` in 
 volume, then recreate it. Images run tooling as the `node` user (UID/GID 1000);
 adapt local bind-mount ownership for other host IDs. Normal file watching uses
 bind-mount events; append `--poll=1000` to `npm start` only if events are unavailable.
-For a future live demo use `npm run start:demo` to disable automatic full reload/HMR;
-a refresh cannot restore an active Match subscription.
+For a live demo, keep the host awake and follow the [root operating conditions](../README.md#play-the-local-demo).
+A refresh cannot restore an active Match subscription.
+
+## Preview the production build locally
+
+From the root, run `cd frontend && npm run build`, then return to the root. With
+backend and PostgreSQL already running, use the same `dc` function above. Stop
+the development frontend only when no browser work will be interrupted.
+
+```sh
+dc stop frontend
+dc run --rm --no-deps --service-ports --name trivia-frontend-preview frontend npm start -- --production-preview
+```
+
+Open the same trusted `https://localhost:4200/`. The existing HTTPS gateway
+serves `frontend/dist/trivia/browser` through the installed Vite preview and
+continues to proxy HTTP and Socket.IO. Stop the preview with Ctrl+C, then use
+`dc start frontend` to restore development. The preview is for local acceptance.
 
 ## HTTPS boundary and routing
 
@@ -239,7 +258,8 @@ if enabled by root Compose, does not bypass its HTTPS enforcement.
 dc exec frontend node --version
 dc exec frontend npm --version
 dc exec frontend npm exec ng version
-dc exec frontend npm run check
+# From the repository root, run native frontend verification:
+# cd frontend && npm run check
 # Individual scripts: typecheck, test, lint, format:check, build.
 # Production assets: frontend/dist/trivia/browser (static SPA, no SSR).
 dc logs frontend backend
@@ -325,7 +345,7 @@ GETs with Cookie, Referer, same-origin/cors/empty Fetch Metadata and no Origin,
 followed by 200 responses. Polling POST supplies Origin; upgrade reaches WebSocket.
 Do not attempt a frontend header workaround.
 
-Stage 1 implementation is confined to foundations/tooling. Stage 2 remains unstarted.
+The following sections retain historical Stage 1 and Stage 2 verification.
 
 ## Initial Stage 1 execution record (2026-11-10)
 
@@ -435,4 +455,4 @@ verified no canonical conflicts/invalid usernames, and applied accepted migratio
 002–003. The ledger is now 001–003 and the existing Player count was preserved. No
 registration migration or persistent-volume reset was needed. Disposable test accounts/database/credential
 files are removed after verification, and the original runtime database connection
-is restored. No Match, lobby, gameplay, or History UI has been added.
+was restored for that verification.

@@ -18,7 +18,7 @@ The repository root owns Git, `compose.backend.yml` (standalone backend),
 `compose.frontend.yml` (frontend overlay), and `docs/`. Combine both files for
 frontend development; application Dockerfiles stay in their own directories.
 The backend application and its tooling live in `backend/`; `frontend/` contains
-the standalone Angular Stage 1 foundation. Do not run Angular CLI
+the standalone Angular M1 application. Do not run Angular CLI
 from `backend/`. `docs/api-contract.md` is authoritative for frontend integration.
 
 `backend/src/main.ts` wires startup, database availability, and shutdown;
@@ -57,8 +57,9 @@ clean shutdown. Report exact checks and limitations; do not claim unrun checks p
 ## Scope & Delivery
 
 The accepted backend supports authentication, ten-question gameplay, atomic
-completion persistence and participant-authorized History. Frontend has Stage 1
-foundations/tooling only; authentication, lobby, gameplay and History UI are not implemented.
+completion persistence and participant-authorized History. The frontend supports
+registration, sign-in, Match entry, live gameplay, final standings and History.
+Follow the documented BUG-009 demo operating conditions in `README.md`.
 Do not implement deferred policies or add Redis, brokers, distributed
 ownership, or active-Match recovery without approval. Preserve unrelated user work.
 Keep `.env`, dependencies, builds, and caches out of Git; retain the lockfile.

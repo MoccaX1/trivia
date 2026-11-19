@@ -7,6 +7,7 @@ const origin = 'https://localhost:4200';
 const fullMatch = process.env.SMOKE_FULL_MATCH === '1';
 const countdownOnly = process.env.SMOKE_COUNTDOWN === '1';
 const historyAcceptance = process.env.SMOKE_HISTORY === '1';
+const productionAcceptance = process.env.SMOKE_PRODUCTION === '1';
 const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
 const fixtures = JSON.parse(
   await readFile('/smoke/lobby-fixtures.json', 'utf8').catch(() =>
@@ -63,6 +64,11 @@ async function login(page, account) {
   await page.getByLabel('Password', { exact: true }).fill(account.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Create Match', exact: true })).toBeEnabled();
+  if (productionAcceptance) {
+    const cookies = await page.context().cookies(origin);
+    const session = cookies.find(({ name }) => name.startsWith('__Host-'));
+    assert.ok(session?.secure && session.httpOnly && session.sameSite === 'Lax');
+  }
 }
 
 async function registerAndLogin(page, account) {
@@ -349,7 +355,36 @@ async function verifyFullMatch(matchId, players) {
           gameplaySockets[index],
           index,
         );
-        return { viewer, questions, reveals, finished, timerSamples, history };
+        if (productionAcceptance) {
+          const logout = page.waitForResponse(
+            (r) => r.url().endsWith('/auth/logout') && r.request().method() === 'POST',
+          );
+          await page.getByRole('button', { name: 'Sign out' }).click();
+          assert.equal((await logout).status(), 204);
+          await expect(page).toHaveURL(origin + '/login');
+          assert.equal(
+            await page.evaluate(
+              async () => (await fetch('/history', { credentials: 'include' })).status,
+            ),
+            401,
+          );
+          await page.goto(origin + '/play/history/' + matchId);
+          await expect(page).toHaveURL(origin + '/login');
+          await expect(page.locator('.question')).toHaveCount(0);
+          assert.equal(
+            (await page.context().cookies(origin)).some(({ name }) => name.startsWith('__Host-')),
+            false,
+          );
+        }
+        return {
+          viewer,
+          questions,
+          reveals,
+          finished,
+          timerSamples,
+          history,
+          logoutVerified: productionAcceptance,
+        };
       }
       page.once('dialog', (dialog) => dialog.accept());
       await page.getByRole('link', { name: 'Back to Play' }).click();
@@ -388,6 +423,20 @@ async function verifyFullMatch(matchId, players) {
 }
 
 try {
+  if (productionAcceptance) {
+    const page = pages[0];
+    await page.goto(origin + '/play/history');
+    await expect(page).toHaveURL(origin + '/login');
+    const assets = await page
+      .locator('script[src]')
+      .evaluateAll((scripts) => scripts.map((script) => script.getAttribute('src')));
+    assert.ok(
+      assets.some((src) => /(?:^|\/)main-[A-Z0-9]+\.js$/.test(src)),
+      JSON.stringify(assets),
+    );
+    assert.ok(assets.every((src) => !src.includes('@vite/client')));
+    await writeFile('/smoke/production-assets.json', JSON.stringify(assets));
+  }
   const firstPlayer = fixtures.players.length;
   for (const [i, page] of pages.entries()) {
     await registerAndLogin(page, accounts[i]);

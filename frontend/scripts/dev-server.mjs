@@ -47,17 +47,30 @@ server.on('upgrade', (request, socket, head) => {
     socket.destroy();
   }
 });
+const preview = process.argv[2] === '--production-preview';
 const child = spawn(
   process.execPath,
-  [
-    'node_modules/@angular/cli/bin/ng.js',
-    'serve',
-    '--host',
-    '127.0.0.1',
-    '--port',
-    '4201',
-    ...process.argv.slice(2),
-  ],
+  preview
+    ? [
+        'node_modules/vite/bin/vite.js',
+        'preview',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '4201',
+        '--strictPort',
+        '--outDir',
+        'dist/trivia/browser',
+      ]
+    : [
+        'node_modules/@angular/cli/bin/ng.js',
+        'serve',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '4201',
+        ...process.argv.slice(2),
+      ],
   { stdio: 'inherit' },
 );
 server.listen(4200, '0.0.0.0', () =>

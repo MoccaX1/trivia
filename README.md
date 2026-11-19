@@ -1,9 +1,9 @@
-# Trivia Game M1 backend
+# Trivia Game M1
 
 Single-process TypeScript backend in `backend/`: authenticated realtime gameplay
 through ten questions and ten reveals, live FINISHED, atomic PostgreSQL completion
-persistence, and participant-authorized HTTP History. `frontend/` contains the
-Stage 1 Angular foundation; shared designs and the
+persistence, and participant-authorized HTTP History. The Angular SPA in
+`frontend/` supports registration, sign-in, Match play, and History. Shared designs and the
 [frontend API contract](docs/api-contract.md) remain in `docs/`.
 
 Run Compose from the repository root. Use your active NVM Node/npm for frontend
@@ -12,12 +12,38 @@ backend regression, real socket tests and full-stack browser checks in Docker.
 
 For Docker-first Angular tooling, local HTTPS certificates, browser smoke checks,
 and the narrowly authenticated same-origin polling policy, see the
-[frontend README](frontend/README.md). Authentication UI and gameplay are not implemented.
+[frontend README](frontend/README.md).
 
 Root orchestration uses `compose.backend.yml` for the standalone backend and
 `compose.frontend.yml` as its frontend development overlay. Combine them with
 `docker compose -f compose.backend.yml -f compose.frontend.yml`; application
 Dockerfiles remain in `backend/` and `frontend/`.
+
+## Play the local demo
+
+Prepare `backend/.env`, apply migrations with the documented tools service, and
+generate and trust the local CA using the [frontend setup](frontend/README.md#local-development).
+For an already prepared checkout, start the stack from the repository root:
+
+```sh
+docker compose --env-file backend/.env -f compose.backend.yml -f compose.frontend.yml up -d --wait
+```
+
+Open `https://localhost:4200/` in two separate browser profiles so the Players have
+independent cookies. Register or sign in, create a Match in one profile, and join
+with its ID from the other. The Host starts the Match. After ten questions and
+reveals, open **View Match History** from FINISHED. If the result is unavailable,
+use **Refresh** after the completion transaction has had a chance to commit.
+
+Keep the host awake during play. After host resume, restart the backend before
+serving new Matches in an agreed maintenance window. A restart invalidates sessions
+and loses active Matches. Committed History remains available after sign-in.
+Lost live connections show a stale view and cannot restore a Match subscription.
+See [BUG-009](docs/known-issues.md#bug-009).
+
+Run `cd frontend && npm run check` and `cd backend && npm run test:docker`
+from the repository root in separate shells. The latter requires the isolated
+`trivia_test` setup below.
 
 ## Design authority
 

@@ -491,6 +491,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Impact:** Demo-critical History retrieval is covered; this does not establish production deployment or crash recovery.
 - **Stage 5B frontend evidence:** Protected History List and Detail, manual refresh and paging, and the FINISHED entry point are implemented. [Angular route and HTTP tests](../frontend/src/app/history/history.spec.ts) cover cursor handling, stale session and route responses, exact scores, and a manual refresh after Detail 404. A targeted trusted-HTTPS Chromium run with an existing participant verified the Play entry point, committed List and Detail, and authenticated reload. Full two-player browser acceptance and PostgreSQL comparison remain Stage 5C.
 - **Stage 5C verification:** Two Chromium participants completed ten questions and ten reveals, followed FINISHED into History, and verified their List and Detail against their authorized snapshots. Both initial Detail requests returned 200. An independent read-only PostgreSQL query matched the two standings rows, ten questions, 40 choices, and 20 viewer answer rows, including the explicit no-answer row. An authenticated outsider received an empty List and identical Detail 404 responses for the participant Match and an unknown ID. Reproduce with [the existing lobby smoke](../frontend/scripts/lobby-browser-smoke.mjs) and `SMOKE_HISTORY=1`.
+- **Stage 6A production-build evidence:** The same trusted HTTPS gateway served the optimized browser bundle in [local preview](../frontend/README.md#preview-the-production-build-locally). Match `8b6ab33f-636c-4dc8-a4e7-5976010e3e99` completed ten questions and ten reveals for both viewers, with participant History, outsider denial, matching PostgreSQL readback and successful logout. Question countdowns were positive on opening. REVEAL transitions were server-driven and the accepted REVEAL UI does not display a countdown.
 - **Next action:** Preserve these integration gates and complete independent Slice 6 review.
 - **Related:** DEF-001, DEF-002, DEF-003.
 
@@ -504,6 +505,7 @@ Remaining propagated Moderate entries: `@eslint-community/eslint-utils` 4.10.1, 
 - **Concern:** Five pre-existing unused underscore-prefixed parameter lint errors stop full-checkout check. Official tools image does not copy these backend-root manual scripts, so its full check passes.
 - **Policy / status:** Manual scripts and lint rules left unchanged to preserve slice scope. This is distinct from new authentication verification.
 - **Impact:** Native/full-checkout check and official image check cover different files.
+- **Stage 6A verification:** Native full-checkout ESLint reported the same five errors in three root manual scripts. Prettier reported six root manual scripts. Backend typecheck and build passed, and the isolated Docker regression reported 324 passed with no skips.
 - **Next action:** Approve focused manual-script lint cleanup or an explicit verification-scope rule; do not claim the full checkout passed.
 - **Related:** DEBT-001.
 
@@ -699,6 +701,8 @@ Public exposure should wait for trusted transport identity, phase-safe projectio
 - **Verification:** [Route tests](../frontend/src/app/match/match-lobby.spec.ts) exercise Match A → B in the same component. [MatchSession tests](../frontend/src/app/match/match-session.spec.ts) exercise same-envelope retry, stale ACKs, rollover and receipt versus snapshot ordering. The [two-player Chromium smoke](../frontend/scripts/lobby-browser-smoke.mjs) verified first and changed answers against authorized snapshots and retirement on question 2.
 - **Stage 4D regression:** A deterministic MatchSession test delivers two accepted receipts before either publication, then a delayed matching snapshot, a conflicting newer snapshot, and obsolete delivery. Confirmed selection and attempts follow snapshots throughout. The matching snapshot does not settle the newer receipt.
 - **Limitations:** A receipt may precede or outlast publication. Match recovery remains deferred under [DEC-006](#dec-006) and [DEC-012](#dec-012).
+
+<a id="bug-009"></a>
 
 ### BUG-009 — Clock disagreement can display zero throughout a live question
 
